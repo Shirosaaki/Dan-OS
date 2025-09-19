@@ -14,6 +14,6 @@
     void tty_putchar(char c);
 	void tty_putstr(const char* data);
     void tty_putchar_at(unsigned char c, uint8_t color, size_t x, size_t y);
-    void tty_middle_screen(const char* data, size_t len);
+    void tty_middle_screen(const char* data);
 
 #endif //PRINT_H

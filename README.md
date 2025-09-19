@@ -32,7 +32,7 @@ To leave the build environment, enter `exit`.
 
 You can emulate your operating system using [Qemu](https://www.qemu.org/):
 
-- `qemu-system-x86_64 -cdrom build/x86_64/DanOs.iso`
+- `qemu-system-x86_64 -cdrom dist/x86_64/kernel.iso`
 - You also should be able to load the operating system on a USB drive and boot into it when you turn on your computer, check your BIOS setup to unable secure boot options and enable legacy boot.
 
 ## Cleanup

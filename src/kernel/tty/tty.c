@@ -48,16 +48,23 @@ void tty_setcolor(uint8_t color) {
 }
 
 void tty_putchar_at(unsigned char c, uint8_t color, size_t x, size_t y) {
+    if (c == '\n') {
+        tty_column = 0;
+        tty_row++;
+        return;
+    }
     const size_t index = y * VGA_WIDTH + x;
     tty_buffer[index] = vga_entry(c, color);
+    tty_column = x + 1;
+    tty_row = y;
 }
 
 void tty_putchar(char c) {
     unsigned char uc = c;
     tty_putchar_at(uc, tty_color, tty_column, tty_row);
-    if (++tty_column == VGA_WIDTH)
+    if (tty_column == VGA_WIDTH - 1)
         tty_column = 0;
-    if (++tty_row == VGA_HEIGHT)
+    if (tty_row == VGA_HEIGHT - 1)
         tty_row = 0;
 }
 
@@ -66,7 +73,8 @@ void tty_putstr(const char* data) {
         tty_putchar(data[i]);
 }
 
-void tty_middle_screen(const char* data, size_t len) {
+void tty_middle_screen(const char* data) {
+    size_t len = strlength(data);
     size_t x = (VGA_WIDTH - len) / 2;
     size_t y = VGA_HEIGHT / 2;
     for (int i = 0; i < len; i++)

@@ -6,5 +6,7 @@
 
 void kernel_main(void) {
     tty_init();
-    tty_middle_screen("Welcome to the DanOS kernel!\n", 29);
+    //tty_middle_screen("Welcome to the DanOS kernel!\n");
+    tty_putstr("Kernel initialized successfully.\nTest121212\ndddd           dddd\n");
+    //while (1);
 }

@@ -2,3 +2,5 @@
 .vscode/
 kernel.bin
 .clang-format
+build/
+obj/
