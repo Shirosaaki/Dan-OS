@@ -52,14 +52,14 @@ void tty_putchar_at(unsigned char c, uint8_t color, size_t x, size_t y) {
     if (c == '\n') {
         tty_column = 0;
         tty_row++;
-        set_cursor_offset((tty_row * VGA_WIDTH + tty_column) * 2);
+        set_cursor_offset((tty_row * VGA_WIDTH + tty_column));
         return;
     }
     const size_t index = y * VGA_WIDTH + x;
     tty_buffer[index] = vga_entry(c, color);
     tty_column = x + 1;
     tty_row = y;
-    set_cursor_offset((tty_row * VGA_WIDTH + tty_column) * 2);
+    set_cursor_offset((tty_row * VGA_WIDTH + tty_column));
 }
 
 void tty_putchar(char c) {
@@ -85,7 +85,6 @@ void tty_middle_screen(const char* data) {
 }
 
 void set_cursor_offset(size_t offset) {
-    offset /= 2; // Each character cell is 2 bytes
     // Send the high byte of the offset
     outb(0x3D4, 14);                   // Command port for high byte
     outb(0x3D5, (uint8_t)(offset >> 8)); // Send high byte
