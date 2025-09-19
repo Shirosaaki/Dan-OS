@@ -6,6 +6,7 @@
 #include "string.h"
 #include "tty.h"
 #include "vga.h"
+#include "../../cpu/ports.h"
 
 static size_t tty_row;
 static size_t tty_column;
@@ -51,12 +52,14 @@ void tty_putchar_at(unsigned char c, uint8_t color, size_t x, size_t y) {
     if (c == '\n') {
         tty_column = 0;
         tty_row++;
+        set_cursor_offset((tty_row * VGA_WIDTH + tty_column) * 2);
         return;
     }
     const size_t index = y * VGA_WIDTH + x;
     tty_buffer[index] = vga_entry(c, color);
     tty_column = x + 1;
     tty_row = y;
+    set_cursor_offset((tty_row * VGA_WIDTH + tty_column) * 2);
 }
 
 void tty_putchar(char c) {
@@ -79,4 +82,15 @@ void tty_middle_screen(const char* data) {
     size_t y = VGA_HEIGHT / 2;
     for (int i = 0; i < len; i++)
         tty_putchar_at(data[i], tty_color, x + i, y);
+}
+
+void set_cursor_offset(size_t offset) {
+    offset /= 2; // Each character cell is 2 bytes
+    // Send the high byte of the offset
+    outb(0x3D4, 14);                   // Command port for high byte
+    outb(0x3D5, (uint8_t)(offset >> 8)); // Send high byte
+
+    // Send the low byte of the offset
+    outb(0x3D4, 15);                   // Command port for low byte
+    outb(0x3D5, (uint8_t)(offset & 0xFF)); // Send low byte
 }

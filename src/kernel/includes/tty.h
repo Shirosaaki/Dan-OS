@@ -15,5 +15,6 @@
 	void tty_putstr(const char* data);
     void tty_putchar_at(unsigned char c, uint8_t color, size_t x, size_t y);
     void tty_middle_screen(const char* data);
+	void set_cursor_offset(size_t offset);
 
 #endif //PRINT_H
