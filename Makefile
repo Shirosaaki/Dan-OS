@@ -1,24 +1,30 @@
 ASM_SRCS 	=	$(wildcard src/bootloader/*.asm)
+INTERRUPT_ASM_SRCS = $(wildcard src/kernel/interrupt/*.asm)
 
 KERNEL_SRCS =	$(wildcard src/kernel/*.c)
 TTY_SRCS 	=	$(wildcard src/kernel/tty/*.c)
 STR_SRCS 	=	$(wildcard src/kernel/string/*.c)
+INTERRUPT_SRCS = $(wildcard src/kernel/interrupt/*.c)
 CPU_SRCS 	=	$(wildcard src/cpu/*.c)
 
 ASM_PATH 	= 	src/bootloader/%.asm
+INTERRUPT_ASM_PATH = src/kernel/interrupt/%.asm
 KERNEL_PATH = 	src/kernel/%.c
 TTY_PATH 	= 	src/kernel/tty/%.c
 STR_PATH 	= 	src/kernel/string/%.c
+INTERRUPT_PATH = src/kernel/interrupt/%.c
 CPU_PATH 	= 	src/cpu/%.c
 OBJ_PATH 	= 	obj/%.o
 
 ASM_OBJS 	= 	$(patsubst $(ASM_PATH), $(OBJ_PATH), $(ASM_SRCS))
+INTERRUPT_ASM_OBJS = $(patsubst $(INTERRUPT_ASM_PATH), $(OBJ_PATH), $(INTERRUPT_ASM_SRCS))
 KERNEL_OBJS = 	$(patsubst $(KERNEL_PATH), $(OBJ_PATH), $(KERNEL_SRCS))
 TTY_OBJS 	= 	$(patsubst $(TTY_PATH), $(OBJ_PATH), $(TTY_SRCS))
 STR_OBJS 	= 	$(patsubst $(STR_PATH), $(OBJ_PATH), $(STR_SRCS))
+INTERRUPT_OBJS = $(patsubst $(INTERRUPT_PATH), $(OBJ_PATH), $(INTERRUPT_SRCS))
 CPU_OBJS 	= 	$(patsubst $(CPU_PATH), $(OBJ_PATH), $(CPU_SRCS))
 
-OBJS 		= 	$(ASM_OBJS) $(KERNEL_OBJS) $(TTY_OBJS) $(STR_OBJS) $(CPU_OBJS)
+OBJS 		= 	$(ASM_OBJS) $(INTERRUPT_ASM_OBJS) $(KERNEL_OBJS) $(TTY_OBJS) $(STR_OBJS) $(INTERRUPT_OBJS) $(CPU_OBJS)
 
 NAME 		= 	DanOs
 BIN 		= 	target/x86_64/iso/boot/kernel.bin
@@ -44,6 +50,10 @@ $(KERNEL_OBJS): $(OBJ_PATH): $(KERNEL_PATH)
 	@ $(MK) $(dir $@) && \
 	$(CC) -c $(patsubst $(OBJ_PATH), $(KERNEL_PATH), $@) -o $@
 
+$(INTERRUPT_OBJS): $(OBJ_PATH): $(INTERRUPT_PATH)
+	@ $(MK) $(dir $@) && \
+	$(CC) -c $(patsubst $(OBJ_PATH), $(INTERRUPT_PATH), $@) -o $@
+
 $(TTY_OBJS): $(OBJ_PATH): $(TTY_PATH)
 	@ $(MK) $(dir $@) && \
 	$(CC) -c $(patsubst $(OBJ_PATH), $(TTY_PATH), $@) -o $@
@@ -55,6 +65,10 @@ $(CPU_OBJS): $(OBJ_PATH): $(CPU_PATH)
 $(ASM_OBJS): $(OBJ_PATH): $(ASM_PATH)
 	@ $(MK) $(dir $@) && \
 	$(NASM) $(patsubst $(OBJ_PATH), $(ASM_PATH), $@) -o $@
+
+$(INTERRUPT_ASM_OBJS): $(OBJ_PATH): $(INTERRUPT_ASM_PATH)
+	@ $(MK) $(dir $@) && \
+	$(NASM) $(patsubst $(OBJ_PATH), $(INTERRUPT_ASM_PATH), $@) -o $@
 
 .PHONY: build
 build: $(OBJS)

@@ -7,6 +7,8 @@
 
 	#include <stddef.h>
 	#include <stdint.h>
+	#include "isr.h"
+	#include "idt.h"
 
 	void tty_init(void);
     void tty_clear(void);
