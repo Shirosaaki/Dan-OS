@@ -33,9 +33,19 @@ int fat32_init(void) {
 
 // Read and parse boot sector
 int fat32_read_boot_sector(void) {
+    // Use a properly aligned buffer for ATA read
+    uint16_t aligned_buffer[256];  // 512 bytes, properly aligned
+    
     // Read boot sector (LBA 0)
-    if (ata_read_sectors(0, 1, (uint16_t*)&boot_sector) != 0) {
+    if (ata_read_sectors(0, 1, aligned_buffer) != 0) {
         return -1;
+    }
+    
+    // Copy to our boot sector structure
+    uint8_t* src = (uint8_t*)aligned_buffer;
+    uint8_t* dst = (uint8_t*)&boot_sector;
+    for (int i = 0; i < sizeof(fat32_boot_sector_t); i++) {
+        dst[i] = src[i];
     }
     
     // Debug: Show boot signature

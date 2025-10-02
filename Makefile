@@ -32,7 +32,7 @@ LINKER 		= 	src/linker/linker.ld
 ISO 		= 	build/x86_64/$(NAME).iso
 ISO_TARGET 	= 	target/x86_64/iso
 BUILD 		= 	build/x86_64
-DISK_IMG 	= 	build/disk.img
+DISK_IMG 	= 	disk.img
 TRASH 		= 	obj build $(BIN)
 INCLUDE 	= 	src/kernel/includes
 

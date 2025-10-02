@@ -1,10 +1,11 @@
 #include <stdio.h>
 #include <stdint.h>
 
-int main() {
-    FILE *disk = fopen("build/disk.img", "wb");
+int main(int argc, char *argv[]) {
+    const char *filename = (argc > 1) ? argv[1] : "build/disk.img";
+    FILE *disk = fopen(filename, "wb");
     if (!disk) {
-        printf("Cannot create disk file\n");
+        printf("Cannot create disk file: %s\n", filename);
         return 1;
     }
     
