@@ -16,16 +16,12 @@ static void ata_wait_drq(void) {
 }
 
 // Initialize ATA driver
-void ata_init(void) {
-    tty_putstr("Initializing ATA driver...\n");
-    
+void ata_init(void) {    
     // Select master drive
     outb(ata_base + ATA_REG_DEVICE, ATA_MASTER);
     
     // Wait for drive to be ready
     ata_wait_ready();
-    
-    tty_putstr("ATA driver initialized.\n");
 }
 
 // Identify ATA device

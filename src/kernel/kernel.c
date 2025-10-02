@@ -13,31 +13,19 @@ void kernel_main(void) {
     tty_init();
     tty_putstr("Welcome to DanOS!\n");
     tty_putstr("=================\n\n");
-    
     // Initialize interrupts
-    tty_putstr("Initializing interrupts...\n");
     idt_init();
-    tty_putstr("IDT initialized.\n");
-    
     // Initialize keyboard
     keyboard_init();
-    tty_putstr("Keyboard initialized.\n\n");
-    
     // Initialize ATA disk driver
     ata_init();
-    
     // Initialize FAT32 filesystem
-    if (fat32_init() == 0) {
-        tty_putstr("\nFilesystem ready. Type 'ls' to list files.\n");
-    } else {
+    if (fat32_init() != 0) {
         tty_putstr("\nWarning: Filesystem initialization failed.\n");
         tty_putstr("Disk commands may not work.\n");
-    }
-    
-    tty_putstr("\nType 'help' for available commands.\n");
+    }    
     tty_putstr("> ");
     
-    // Infinite loop - interrupts will handle keyboard input
     while (1) {
         __asm__ volatile("hlt"); // Halt until next interrupt
     }

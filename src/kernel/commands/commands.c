@@ -75,7 +75,7 @@ void tty_process_command(void) {
                     }
                     tty_putchar_internal('\n');
                 } else {
-                    tty_putstr("Error reading file\n");
+                    tty_putstr("File is empty !\n");
                 }
             } else {
                 tty_putstr("File not found: ");

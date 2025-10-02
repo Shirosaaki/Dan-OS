@@ -185,9 +185,9 @@ void set_cursor_offset(size_t offset) {
 
 // Handle backspace
 void tty_backspace(void) {
-    if (cmd_buffer_pos > 0) {
-        cmd_buffer_pos--;
-        
+    // Check if in editor mode or normal command mode
+    if (editor_mode) {
+        // In editor mode - always allow backspace for visual feedback
         // Move cursor back
         if (tty_column > 0) {
             tty_column--;
@@ -200,6 +200,24 @@ void tty_backspace(void) {
         const size_t index = tty_row * VGA_WIDTH + tty_column;
         tty_buffer[index] = vga_entry(' ', tty_color);
         set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+    } else {
+        // Normal command mode
+        if (cmd_buffer_pos > 0) {
+            cmd_buffer_pos--;
+            
+            // Move cursor back
+            if (tty_column > 0) {
+                tty_column--;
+            } else if (tty_row > 0) {
+                tty_row--;
+                tty_column = VGA_WIDTH - 1;
+            }
+            
+            // Clear the character
+            const size_t index = tty_row * VGA_WIDTH + tty_column;
+            tty_buffer[index] = vga_entry(' ', tty_color);
+            set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+        }
     }
 }
 

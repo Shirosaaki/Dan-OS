@@ -14,9 +14,7 @@ static int fat32_initialized = 0;
 static uint8_t sector_buffer[512];
 
 // Initialize FAT32 filesystem
-int fat32_init(void) {
-    tty_putstr("Initializing FAT32 filesystem...\n");
-    
+int fat32_init(void) {    
     if (fat32_read_boot_sector() != 0) {
         tty_putstr("Error: Failed to read FAT32 boot sector\n");
         return -1;
@@ -29,11 +27,7 @@ int fat32_init(void) {
     data_start_lba = fat_start_lba + (num_fats * fat_size);
     root_dir_cluster = boot_sector.root_cluster;
     current_directory_cluster = root_dir_cluster;
-    
     fat32_initialized = 1;
-    tty_putstr("FAT32 filesystem initialized successfully.\n");
-    tty_putstr("Root cluster: ");
-    
     return 0;
 }
 
@@ -45,13 +39,10 @@ int fat32_read_boot_sector(void) {
     }
     
     // Debug: Show boot signature
-    tty_putstr("Boot signature: 0x");
     char hex[3];
     hex[0] = "0123456789ABCDEF"[(boot_sector.boot_signature >> 4) & 0xF];
     hex[1] = "0123456789ABCDEF"[boot_sector.boot_signature & 0xF];
     hex[2] = '\0';
-    tty_putstr(hex);
-    tty_putstr("\n");
     
     // More flexible signature check - accept common values
     if (boot_sector.boot_signature != 0x29 && boot_sector.boot_signature != 0x28) {
