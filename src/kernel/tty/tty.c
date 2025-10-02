@@ -14,6 +14,11 @@ static uint8_t tty_color;
 static uint16_t* tty_buffer;
 static uint16_t* const VGA_MEMORY = VGA_BUFFER;
 
+// Command buffer
+#define CMD_BUFFER_SIZE 256
+static char cmd_buffer[CMD_BUFFER_SIZE];
+static int cmd_buffer_pos = 0;
+
 static inline uint8_t vga_entry_color(enum VGA_COLOR fg, enum VGA_COLOR bg) {
     return fg | bg << 4;
 }
@@ -62,18 +67,42 @@ void tty_putchar_at(unsigned char c, uint8_t color, size_t x, size_t y) {
     set_cursor_offset((tty_row * VGA_WIDTH + tty_column));
 }
 
-void tty_putchar(char c) {
+// Internal version for printing that doesn't add to command buffer
+static void tty_putchar_internal(char c) {
+    if (c == '\n') {
+        tty_column = 0;
+        tty_row++;
+        if (tty_row >= VGA_HEIGHT) {
+            tty_row = VGA_HEIGHT - 1;
+        }
+        set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+        return;
+    }
+    
     unsigned char uc = c;
     tty_putchar_at(uc, tty_color, tty_column, tty_row);
-    if (tty_column == VGA_WIDTH - 1)
+    
+    if (tty_column >= VGA_WIDTH - 1) {
         tty_column = 0;
-    if (tty_row == VGA_HEIGHT - 1)
-        tty_row = 0;
+        tty_row++;
+        if (tty_row >= VGA_HEIGHT) {
+            tty_row = VGA_HEIGHT - 1;
+        }
+    }
+}
+
+// Public version - used by keyboard to echo characters
+void tty_putchar(char c) {
+    // Add printable characters to command buffer
+    if (c != '\b' && c != '\n' && cmd_buffer_pos < CMD_BUFFER_SIZE - 1) {
+        cmd_buffer[cmd_buffer_pos++] = c;
+    }
+    tty_putchar_internal(c);
 }
 
 void tty_putstr(const char* data) {
     for (int i = 0; i < strlength(data); i++)
-        tty_putchar(data[i]);
+        tty_putchar_internal(data[i]);
 }
 
 void tty_middle_screen(const char* data) {
@@ -92,4 +121,77 @@ void set_cursor_offset(size_t offset) {
     // Send the low byte of the offset
     outb(0x3D4, 15);                   // Command port for low byte
     outb(0x3D5, (uint8_t)(offset & 0xFF)); // Send low byte
+}
+
+// Handle backspace
+void tty_backspace(void) {
+    if (cmd_buffer_pos > 0) {
+        cmd_buffer_pos--;
+        
+        // Move cursor back
+        if (tty_column > 0) {
+            tty_column--;
+        } else if (tty_row > 0) {
+            tty_row--;
+            tty_column = VGA_WIDTH - 1;
+        }
+        
+        // Clear the character
+        const size_t index = tty_row * VGA_WIDTH + tty_column;
+        tty_buffer[index] = vga_entry(' ', tty_color);
+        set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+    }
+}
+
+// String comparison helper
+static int str_compare(const char* str1, const char* str2) {
+    int i = 0;
+    while (str1[i] != '\0' && str2[i] != '\0') {
+        if (str1[i] != str2[i]) {
+            return 0;
+        }
+        i++;
+    }
+    return str1[i] == str2[i];
+}
+
+// Process command when Enter is pressed
+void tty_process_command(void) {
+    cmd_buffer[cmd_buffer_pos] = '\0'; // Null terminate
+    
+    // Process the command
+    if (cmd_buffer_pos > 0) {
+        if (str_compare(cmd_buffer, "help")) {
+            tty_putstr("Available commands:\n");
+            tty_putstr("  help   - Show this help message\n");
+            tty_putstr("  clear  - Clear the screen\n");
+            tty_putstr("  echo   - Echo back the input\n");
+            tty_putstr("  about  - Show OS information\n");
+        } else if (str_compare(cmd_buffer, "clear")) {
+            tty_clear();
+            tty_row = 0;
+            tty_column = 0;
+        } else if (str_compare(cmd_buffer, "about")) {
+            tty_putstr("DanOS - A simple 64-bit operating system\n");
+            tty_putstr("Version: 0.1\n");
+            tty_putstr("Author: dan13615\n");
+        } else if (cmd_buffer[0] == 'e' && cmd_buffer[1] == 'c' && 
+                   cmd_buffer[2] == 'h' && cmd_buffer[3] == 'o' && 
+                   cmd_buffer[4] == ' ') {
+            // Echo command
+            for (int i = 5; i < cmd_buffer_pos; i++) {
+                tty_putchar(cmd_buffer[i]);
+            }
+            tty_putchar('\n');
+        } else {
+            tty_putstr("Unknown command: ");
+            tty_putstr(cmd_buffer);
+            tty_putstr("\n");
+            tty_putstr("Type 'help' for available commands.\n");
+        }
+    }
+    
+    // Reset command buffer
+    cmd_buffer_pos = 0;
+    tty_putstr("> ");
 }
