@@ -339,8 +339,13 @@ void tty_exit_editor_mode(void) {
     }
     cmd_buffer_pos = 0; // Clear command buffer
     cmd_buffer[0] = '\0';
-    tty_putstr("\n> ");
-    //tty_putstr("DanOS> ");
+    
+    // Show current directory in prompt
+    char path[64];
+    fat32_get_current_path(path, 64);
+    tty_putstr("\nDanOS:");
+    tty_putstr(path);
+    tty_putstr("$ ");
 }
 
 // Check if in editor mode

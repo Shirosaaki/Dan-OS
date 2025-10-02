@@ -24,7 +24,7 @@ void kernel_main(void) {
         tty_putstr("\nWarning: Filesystem initialization failed.\n");
         tty_putstr("Disk commands may not work.\n");
     }    
-    tty_putstr("> ");
+    tty_putstr("DanOS:/$ ");
     
     while (1) {
         __asm__ volatile("hlt"); // Halt until next interrupt

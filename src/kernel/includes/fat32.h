@@ -100,6 +100,15 @@ int fat32_extend_cluster_chain(uint32_t last_cluster, uint32_t additional_cluste
 int fat32_free_cluster_chain(uint32_t start_cluster);
 int fat32_update_dir_entry_size(const char* filename, uint32_t new_size);
 
+// Directory operations  
+int fat32_create_directory(const char* dirname);
+int fat32_change_directory(const char* dirname);
+int fat32_remove_directory(const char* dirname);
+int fat32_remove_directory_recursive(const char* dirname);
+int fat32_list_directory_by_name(const char* dirname);
+uint32_t fat32_get_current_directory(void);
+void fat32_get_current_path(char* path, int max_len);
+
 // Helper functions
 void fat32_parse_filename(const char* input, char* output);
 int fat32_compare_names(const char* name1, const char* name2);

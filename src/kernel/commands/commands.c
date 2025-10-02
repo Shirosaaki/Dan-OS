@@ -25,10 +25,14 @@ void tty_process_command(void) {
             tty_putstr("  echo     - Echo back the input\n");
             tty_putstr("  about    - Show OS information\n");
             tty_putstr("  ls       - List files in current directory\n");
+            tty_putstr("  ls dir   - List files in specified directory\n");
             tty_putstr("  rd       - Display file contents\n");
             tty_putstr("  ct       - Create file (ct filename content)\n");
             tty_putstr("  rm       - Delete file (rm filename or rm *)\n");
             tty_putstr("  wr       - Text editor (wr filename, Ctrl to save)\n");
+            tty_putstr("  md       - Create directory (md dirname)\n");
+            tty_putstr("  cd       - Change directory (cd dirname or cd ..)\n");
+            tty_putstr("  rmdir    - Remove directory and all contents (rmdir dirname)\n");
             tty_putstr("  disk     - Show disk information\n");
         } else if (strncmp(cmd_buffer, "cls", 3) == 0) {
             tty_clear();
@@ -45,10 +49,25 @@ void tty_process_command(void) {
             }
             tty_putchar_internal('\n');
         } else if (strncmp(cmd_buffer, "ls", 2) == 0) {
-            // List directory
-            tty_putstr("Directory listing:\n");
-            if (fat32_list_directory(0) != 0) {
-                tty_putstr("Error reading directory\n");
+            // List directory - with optional directory name
+            if (strlength(cmd_buffer) > 3 && cmd_buffer[2] == ' ') {
+                // ls dirname - list specific directory
+                char dirname[32];
+                int j = 0;
+                for (int i = 3; i < strlength(cmd_buffer) && j < 31; i++, j++) {
+                    dirname[j] = cmd_buffer[i];
+                }
+                dirname[j] = '\0';
+                if (fat32_list_directory_by_name(dirname) != 0) {
+                    tty_putstr("Error reading directory\n");
+                }
+            } else {
+                // ls - list current directory
+                tty_putstr("Directory listing:\n");
+                uint32_t current_cluster = fat32_get_current_directory();
+                if (fat32_list_directory(current_cluster) != 0) {
+                    tty_putstr("Error reading directory\n");
+                }
             }
         } else if (strncmp(cmd_buffer, "rd ", 3) == 0) {
             // Display file contents
@@ -198,6 +217,67 @@ void tty_process_command(void) {
                     tty_putstr("Error saving file\n");
                 }
             }
+        } else if (strncmp(cmd_buffer, "md ", 3) == 0) {
+            // Create directory: md dirname
+            char dirname[32];
+            int j = 0;
+            for (int i = 3; i < strlength(cmd_buffer) && j < 31; i++, j++) {
+                dirname[j] = cmd_buffer[i];
+            }
+            dirname[j] = '\0';
+            
+            if (dirname[0] == '\0') {
+                tty_putstr("Usage: md dirname\n");
+                tty_putstr("Example: md Documents\n");
+            } else {
+                fat32_create_directory(dirname);
+            }
+        } else if (strncmp(cmd_buffer, "cd ", 3) == 0) {
+            // Change directory: cd dirname
+            char dirname[32];
+            int j = 0;
+            for (int i = 3; i < strlength(cmd_buffer) && j < 31; i++, j++) {
+                dirname[j] = cmd_buffer[i];
+            }
+            dirname[j] = '\0';
+            
+            if (dirname[0] == '\0') {
+                tty_putstr("Usage: cd dirname\n");
+                tty_putstr("Example: cd Documents\n");
+                tty_putstr("Example: cd .. (parent directory)\n");
+            } else {
+                if (fat32_change_directory(dirname) == 0) {
+                    tty_putstr("Changed to directory: ");
+                    tty_putstr(dirname);
+                    tty_putstr("\n");
+                }
+            }
+        } else if (strncmp(cmd_buffer, "cd", 2) == 0 && strlength(cmd_buffer) == 2) {
+            // cd without arguments - show current directory
+            char path[64];
+            fat32_get_current_path(path, 64);
+            tty_putstr("Current directory: ");
+            tty_putstr(path);
+            tty_putstr("\n");
+        } else if (strncmp(cmd_buffer, "rmdir ", 6) == 0) {
+            // Remove directory: rmdir dirname
+            char dirname[32];
+            int j = 0;
+            for (int i = 6; i < strlength(cmd_buffer) && j < 31; i++, j++) {
+                dirname[j] = cmd_buffer[i];
+            }
+            dirname[j] = '\0';
+            
+            if (dirname[0] == '\0') {
+                tty_putstr("Usage: rmdir dirname\n");
+                tty_putstr("Example: rmdir Documents\n");
+                tty_putstr("Warning: This will remove the directory and ALL its contents!\n");
+            } else {
+                tty_putstr("Warning: Removing directory and all contents: ");
+                tty_putstr(dirname);
+                tty_putstr("\n");
+                fat32_remove_directory_recursive(dirname);
+            }
         } else {
             tty_putstr("Unknown command: ");
             tty_putstr(cmd_buffer);
@@ -208,5 +288,11 @@ void tty_process_command(void) {
     
     // Reset command buffer
     cmd_buffer_pos = 0;
-    tty_putstr("> ");
+    
+    // Show current directory in prompt
+    char path[64];
+    fat32_get_current_path(path, 64);
+    tty_putstr("DanOS:");
+    tty_putstr(path);
+    tty_putstr("$ ");
 }

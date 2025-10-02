@@ -9,6 +9,7 @@ static uint32_t data_start_lba;
 static uint32_t root_dir_cluster;
 static uint32_t current_directory_cluster;
 static int fat32_initialized = 0;
+static char current_full_path[256] = "/";
 
 // Buffer for reading sectors
 static uint8_t sector_buffer[512];
@@ -116,6 +117,21 @@ void fat32_parse_filename(const char* input, char* output) {
         output[i] = ' ';
     }
     
+    // Handle special directory entries "." and ".."
+    if (input[0] == '.' && input[1] == '\0') {
+        // Current directory "."
+        output[0] = '.';
+        return;
+    }
+    
+    if (input[0] == '.' && input[1] == '.' && input[2] == '\0') {
+        // Parent directory ".."
+        output[0] = '.';
+        output[1] = '.';
+        return;
+    }
+    
+    // Parse regular filename
     // Parse name part
     for (i = 0, j = 0; i < 8 && input[j] != '\0' && input[j] != '.'; i++, j++) {
         if (input[j] >= 'a' && input[j] <= 'z') {
@@ -903,4 +919,557 @@ int fat32_update_file(const char* filename, const uint8_t* data, uint32_t new_si
         // File doesn't exist - create new file
         return fat32_create_file(filename, data, new_size);
     }
+}
+
+// Create a new directory
+int fat32_create_directory(const char* dirname) {
+    if (!fat32_initialized) {
+        tty_putstr("Error: FAT32 not initialized\n");
+        return -1;
+    }
+    
+    tty_putstr("Creating directory: ");
+    tty_putstr(dirname);
+    tty_putstr("\n");
+    
+    char fat32_name[11];
+    fat32_parse_filename(dirname, fat32_name);
+    
+    // Check if directory already exists
+    fat32_dir_entry_t existing_entry;
+    if (fat32_find_file(dirname, current_directory_cluster, &existing_entry) == 0) {
+        tty_putstr("Error: Directory already exists: ");
+        tty_putstr(dirname);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Allocate cluster for new directory
+    uint32_t dir_cluster = fat32_allocate_cluster();
+    if (dir_cluster == 0) {
+        tty_putstr("Error: No free clusters available\n");
+        return -1;
+    }
+    
+    // Mark end of cluster chain
+    fat32_set_next_cluster(dir_cluster, FAT32_EOC);
+    
+    // Clear directory cluster
+    uint8_t empty_sector[512];
+    for (int i = 0; i < 512; i++) empty_sector[i] = 0;
+    
+    uint32_t lba = fat32_cluster_to_lba(dir_cluster);
+    for (uint32_t i = 0; i < boot_sector.sectors_per_cluster; i++) {
+        if (ata_write_sectors(lba + i, 1, (uint16_t*)empty_sector) != 0) {
+            tty_putstr("Error: Could not clear directory cluster\n");
+            return -1;
+        }
+    }
+    
+    // Create "." entry (current directory)
+    fat32_dir_entry_t dot_entry;
+    for (int i = 0; i < 11; i++) dot_entry.name[i] = ' ';
+    dot_entry.name[0] = '.';
+    dot_entry.attributes = FAT_ATTR_DIRECTORY;
+    dot_entry.reserved = 0;
+    dot_entry.create_time_tenth = 0;
+    dot_entry.create_time = fat32_get_current_time();
+    dot_entry.create_date = fat32_get_current_date();
+    dot_entry.access_date = fat32_get_current_date();
+    dot_entry.first_cluster_high = (dir_cluster >> 16) & 0xFFFF;
+    dot_entry.modify_time = fat32_get_current_time();
+    dot_entry.modify_date = fat32_get_current_date();
+    dot_entry.first_cluster_low = dir_cluster & 0xFFFF;
+    dot_entry.file_size = 0;
+    
+    // Create ".." entry (parent directory)
+    fat32_dir_entry_t dotdot_entry;
+    for (int i = 0; i < 11; i++) dotdot_entry.name[i] = ' ';
+    dotdot_entry.name[0] = '.';
+    dotdot_entry.name[1] = '.';
+    dotdot_entry.attributes = FAT_ATTR_DIRECTORY;
+    dotdot_entry.reserved = 0;
+    dotdot_entry.create_time_tenth = 0;
+    dotdot_entry.create_time = fat32_get_current_time();
+    dotdot_entry.create_date = fat32_get_current_date();
+    dotdot_entry.access_date = fat32_get_current_date();
+    
+    // Special case: if current directory is root, ".." should point to root (cluster 0 in some systems)
+    uint32_t parent_cluster = current_directory_cluster;
+    if (current_directory_cluster == boot_sector.root_cluster) {
+        parent_cluster = 0; // Root directory special case for ".."
+    }
+    
+    dotdot_entry.first_cluster_high = (parent_cluster >> 16) & 0xFFFF;
+    dotdot_entry.modify_time = fat32_get_current_time();
+    dotdot_entry.modify_date = fat32_get_current_date();
+    dotdot_entry.first_cluster_low = parent_cluster & 0xFFFF;
+    dotdot_entry.file_size = 0;
+    
+    // Write . and .. entries to the new directory
+    uint8_t sector_buffer[512];
+    for (int i = 0; i < 512; i++) sector_buffer[i] = 0;
+    
+    fat32_dir_entry_t* entries = (fat32_dir_entry_t*)sector_buffer;
+    entries[0] = dot_entry;
+    entries[1] = dotdot_entry;
+    
+    if (ata_write_sectors(lba, 1, (uint16_t*)sector_buffer) != 0) {
+        tty_putstr("Error: Could not write directory entries\n");
+        return -1;
+    }
+    
+    // Create directory entry in parent directory
+    fat32_dir_entry_t new_dir_entry;
+    fat32_parse_filename(dirname, (char*)new_dir_entry.name);
+    new_dir_entry.attributes = FAT_ATTR_DIRECTORY;
+    new_dir_entry.reserved = 0;
+    new_dir_entry.create_time_tenth = 0;
+    new_dir_entry.create_time = fat32_get_current_time();
+    new_dir_entry.create_date = fat32_get_current_date();
+    new_dir_entry.access_date = fat32_get_current_date();
+    new_dir_entry.first_cluster_high = (dir_cluster >> 16) & 0xFFFF;
+    new_dir_entry.modify_time = fat32_get_current_time();
+    new_dir_entry.modify_date = fat32_get_current_date();
+    new_dir_entry.first_cluster_low = dir_cluster & 0xFFFF;
+    new_dir_entry.file_size = 0;
+    
+    // Add entry to parent directory
+    if (fat32_add_dir_entry(current_directory_cluster, &new_dir_entry) != 0) {
+        tty_putstr("Error: Could not add directory entry\n");
+        return -1;
+    }
+    
+    tty_putstr("Directory created successfully: ");
+    tty_putstr(dirname);
+    tty_putstr("\n");
+    return 0;
+    
+    /*
+    char fat32_name[11];
+    fat32_parse_filename(dirname, fat32_name);
+    
+    // Check if directory already exists
+    fat32_dir_entry_t existing_entry;
+    if (fat32_find_file(dirname, current_directory_cluster, &existing_entry) == 0) {
+        tty_putstr("Error: Directory already exists: ");
+        tty_putstr(dirname);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Allocate cluster for new directory
+    uint32_t dir_cluster = fat32_allocate_cluster();
+    if (dir_cluster == 0) {
+        tty_putstr("Error: No free clusters available\n");
+        return -1;
+    }*/
+}
+
+// Change current directory
+int fat32_change_directory(const char* dirname) {
+    if (!fat32_initialized) {
+        tty_putstr("Error: FAT32 not initialized\n");
+        return -1;
+    }
+    
+    // Handle special cases
+    if (dirname[0] == '.' && dirname[1] == '\0') {
+        // Current directory - no change needed
+        return 0;
+    }
+    
+    if (dirname[0] == '.' && dirname[1] == '.' && dirname[2] == '\0') {
+        // Parent directory
+        fat32_dir_entry_t dotdot_entry;
+        if (fat32_find_file("..", current_directory_cluster, &dotdot_entry) == 0) {
+            uint32_t parent_cluster = ((uint32_t)dotdot_entry.first_cluster_high << 16) | dotdot_entry.first_cluster_low;
+            
+            // Handle special case where ".." points to root (cluster 0)
+            if (parent_cluster == 0) {
+                parent_cluster = boot_sector.root_cluster;
+            }
+            
+            current_directory_cluster = parent_cluster;
+            
+            // Update full path - go up one level
+            if (parent_cluster == boot_sector.root_cluster) {
+                current_full_path[0] = '/';
+                current_full_path[1] = '\0';
+            } else {
+                // Remove the last directory from the path
+                int len = 0;
+                while (current_full_path[len] != '\0') len++; // Get string length
+                
+                // Go backwards to find the last '/' (but not the first one)
+                if (len > 1) {
+                    len--; // Skip the trailing character
+                    while (len > 0 && current_full_path[len] != '/') {
+                        len--;
+                    }
+                    current_full_path[len + 1] = '\0'; // Keep the '/' and terminate after it
+                    
+                    // If we're back to root, make sure it's just "/"
+                    if (len == 0) {
+                        current_full_path[1] = '\0';
+                    }
+                }
+            }
+            
+            tty_putstr("Changed to parent directory\n");
+            return 0;
+        } else {
+            tty_putstr("Error: Cannot find .. entry in current directory\n");
+            tty_putstr("Debugging: Listing current directory contents:\n");
+            fat32_list_directory(current_directory_cluster);
+            return -1;
+        }
+    }
+    
+    // Find the directory
+    fat32_dir_entry_t entry;
+    if (fat32_find_file(dirname, current_directory_cluster, &entry) != 0) {
+        tty_putstr("Error: Directory not found: ");
+        tty_putstr(dirname);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Check if it's actually a directory
+    if (!(entry.attributes & FAT_ATTR_DIRECTORY)) {
+        tty_putstr("Error: Not a directory: ");
+        tty_putstr(dirname);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Change to the directory
+    uint32_t new_cluster = ((uint32_t)entry.first_cluster_high << 16) | entry.first_cluster_low;
+    current_directory_cluster = new_cluster;
+    
+    // Update full path - add new directory
+    int path_len = 0;
+    while (current_full_path[path_len] != '\0') path_len++; // Get current path length
+    
+    // If not at root, add a slash separator
+    if (path_len > 1) {
+        current_full_path[path_len++] = '/';
+    }
+    
+    // Add the new directory name
+    int j = 0;
+    while (j < 200 && dirname[j] != '\0' && (path_len + j) < 255) {
+        current_full_path[path_len + j] = dirname[j];
+        j++;
+    }
+    current_full_path[path_len + j] = '\0';
+    
+    return 0;
+}
+
+// Remove an empty directory
+int fat32_remove_directory(const char* dirname) {
+    if (!fat32_initialized) {
+        tty_putstr("Error: FAT32 not initialized\n");
+        return -1;
+    }
+    
+    // Don't allow removing . or ..
+    if ((dirname[0] == '.' && dirname[1] == '\0') || 
+        (dirname[0] == '.' && dirname[1] == '.' && dirname[2] == '\0')) {
+        tty_putstr("Error: Cannot remove . or ..\n");
+        return -1;
+    }
+    
+    // Find the directory
+    fat32_dir_entry_t entry;
+    if (fat32_find_file(dirname, current_directory_cluster, &entry) != 0) {
+        tty_putstr("Error: Directory not found: ");
+        tty_putstr(dirname);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Check if it's actually a directory
+    if (!(entry.attributes & FAT_ATTR_DIRECTORY)) {
+        tty_putstr("Error: Not a directory: ");
+        tty_putstr(dirname);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Check if directory is empty (should only contain . and ..)
+    uint32_t dir_cluster = ((uint32_t)entry.first_cluster_high << 16) | entry.first_cluster_low;
+    uint32_t lba = fat32_cluster_to_lba(dir_cluster);
+    uint8_t sector_buffer[512];
+    
+    if (ata_read_sectors(lba, 1, (uint16_t*)sector_buffer) != 0) {
+        tty_putstr("Error: Could not read directory\n");
+        return -1;
+    }
+    
+    fat32_dir_entry_t* entries = (fat32_dir_entry_t*)sector_buffer;
+    int entry_count = 0;
+    
+    for (int i = 0; i < 512 / sizeof(fat32_dir_entry_t); i++) {
+        if (entries[i].name[0] == 0x00) break; // End of directory
+        if (entries[i].name[0] == 0xE5) continue; // Deleted entry
+        
+        entry_count++;
+        
+        // Allow only . and .. entries
+        if (!(entries[i].name[0] == '.' && 
+              (entries[i].name[1] == ' ' || entries[i].name[1] == '.'))) {
+            tty_putstr("Error: Directory not empty: ");
+            tty_putstr(dirname);
+            tty_putstr("\n");
+            return -1;
+        }
+    }
+    
+    // Directory is empty, proceed with deletion
+    // Free the directory's cluster
+    fat32_set_next_cluster(dir_cluster, 0);
+    
+    // Remove directory entry from parent
+    char fat32_name[11];
+    fat32_parse_filename(dirname, fat32_name);
+    
+    lba = fat32_cluster_to_lba(current_directory_cluster);
+    
+    for (uint32_t sector = 0; sector < boot_sector.sectors_per_cluster; sector++) {
+        if (ata_read_sectors(lba + sector, 1, (uint16_t*)sector_buffer) != 0) {
+            return -1;
+        }
+        
+        entries = (fat32_dir_entry_t*)sector_buffer;
+        
+        for (int i = 0; i < 512 / sizeof(fat32_dir_entry_t); i++) {
+            if (entries[i].name[0] == 0x00) break;
+            if (entries[i].name[0] == 0xE5) continue;
+            
+            if (fat32_compare_names((char*)entries[i].name, fat32_name)) {
+                // Mark as deleted
+                entries[i].name[0] = 0xE5;
+                
+                // Write back
+                if (ata_write_sectors(lba + sector, 1, (uint16_t*)sector_buffer) != 0) {
+                    tty_putstr("Error: Could not update directory\n");
+                    return -1;
+                }
+                
+                tty_putstr("Directory removed: ");
+                tty_putstr(dirname);
+                tty_putstr("\n");
+                return 0;
+            }
+        }
+    }
+    
+    tty_putstr("Error: Could not find directory entry\n");
+    return -1;
+}
+
+// Remove a directory recursively (with all contents)
+int fat32_remove_directory_recursive(const char* dirname) {
+    if (!fat32_initialized) {
+        tty_putstr("Error: FAT32 not initialized\n");
+        return -1;
+    }
+    
+    // Don't allow removing . or ..
+    if ((dirname[0] == '.' && dirname[1] == '\0') || 
+        (dirname[0] == '.' && dirname[1] == '.' && dirname[2] == '\0')) {
+        tty_putstr("Error: Cannot remove . or ..\n");
+        return -1;
+    }
+    
+    // Find the directory
+    fat32_dir_entry_t entry;
+    if (fat32_find_file(dirname, current_directory_cluster, &entry) != 0) {
+        tty_putstr("Error: Directory not found: ");
+        tty_putstr(dirname);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Check if it's actually a directory
+    if (!(entry.attributes & FAT_ATTR_DIRECTORY)) {
+        tty_putstr("Error: Not a directory: ");
+        tty_putstr(dirname);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    uint32_t dir_cluster = ((uint32_t)entry.first_cluster_high << 16) | entry.first_cluster_low;
+    
+    // First, recursively delete all contents of the directory
+    uint32_t lba = fat32_cluster_to_lba(dir_cluster);
+    uint8_t sector_buffer[512];
+    
+    for (uint32_t sector = 0; sector < boot_sector.sectors_per_cluster; sector++) {
+        if (ata_read_sectors(lba + sector, 1, (uint16_t*)sector_buffer) != 0) {
+            tty_putstr("Error: Could not read directory contents\n");
+            return -1;
+        }
+        
+        fat32_dir_entry_t* entries = (fat32_dir_entry_t*)sector_buffer;
+        
+        for (int i = 0; i < 512 / sizeof(fat32_dir_entry_t); i++) {
+            if (entries[i].name[0] == 0x00) break; // End of directory
+            if (entries[i].name[0] == 0xE5) continue; // Already deleted
+            
+            // Skip . and .. entries
+            if (entries[i].name[0] == '.' && 
+                (entries[i].name[1] == ' ' || entries[i].name[1] == '.')) {
+                continue;
+            }
+            
+            // Convert FAT32 name back to normal filename for deletion
+            char filename[12];
+            int pos = 0;
+            
+            // Copy name part (8 chars)
+            for (int j = 0; j < 8 && entries[i].name[j] != ' '; j++) {
+                filename[pos++] = entries[i].name[j];
+            }
+            
+            // Add extension if present
+            if (entries[i].name[8] != ' ') {
+                filename[pos++] = '.';
+                for (int j = 8; j < 11 && entries[i].name[j] != ' '; j++) {
+                    filename[pos++] = entries[i].name[j];
+                }
+            }
+            filename[pos] = '\0';
+            
+            if (entries[i].attributes & FAT_ATTR_DIRECTORY) {
+                // It's a subdirectory - recursively delete it
+                tty_putstr("Removing subdirectory: ");
+                tty_putstr(filename);
+                tty_putstr("\n");
+                
+                // Save current directory
+                uint32_t saved_current_dir = current_directory_cluster;
+                
+                // Change to the directory we're cleaning
+                current_directory_cluster = dir_cluster;
+                
+                // Recursively delete subdirectory
+                fat32_remove_directory_recursive(filename);
+                
+                // Restore current directory
+                current_directory_cluster = saved_current_dir;
+            } else {
+                // It's a file - delete it
+                tty_putstr("Removing file: ");
+                tty_putstr(filename);
+                tty_putstr("\n");
+                
+                // Save current directory
+                uint32_t saved_current_dir = current_directory_cluster;
+                
+                // Change to the directory containing the file
+                current_directory_cluster = dir_cluster;
+                
+                // Delete the file
+                fat32_delete_file(filename);
+                
+                // Restore current directory
+                current_directory_cluster = saved_current_dir;
+            }
+        }
+    }
+    
+    // Now the directory should be empty, delete it using the regular function
+    // Free the directory's cluster chain
+    fat32_free_cluster_chain(dir_cluster);
+    
+    // Remove directory entry from parent
+    char fat32_name[11];
+    fat32_parse_filename(dirname, fat32_name);
+    
+    lba = fat32_cluster_to_lba(current_directory_cluster);
+    
+    for (uint32_t sector = 0; sector < boot_sector.sectors_per_cluster; sector++) {
+        if (ata_read_sectors(lba + sector, 1, (uint16_t*)sector_buffer) != 0) {
+            return -1;
+        }
+        
+        fat32_dir_entry_t* entries = (fat32_dir_entry_t*)sector_buffer;
+        
+        for (int i = 0; i < 512 / sizeof(fat32_dir_entry_t); i++) {
+            if (entries[i].name[0] == 0x00) break;
+            if (entries[i].name[0] == 0xE5) continue;
+            
+            if (fat32_compare_names((char*)entries[i].name, fat32_name)) {
+                // Mark as deleted
+                entries[i].name[0] = 0xE5;
+                
+                // Write back
+                if (ata_write_sectors(lba + sector, 1, (uint16_t*)sector_buffer) != 0) {
+                    tty_putstr("Error: Could not update directory\n");
+                    return -1;
+                }
+                
+                tty_putstr("Directory and all contents removed: ");
+                tty_putstr(dirname);
+                tty_putstr("\n");
+                return 0;
+            }
+        }
+    }
+    
+    tty_putstr("Error: Could not find directory entry\n");
+    return -1;
+}
+
+// List a specific directory by name  
+int fat32_list_directory_by_name(const char* dirname) {
+    if (!fat32_initialized) {
+        tty_putstr("Error: FAT32 not initialized\n");
+        return -1;
+    }
+    
+    uint32_t target_cluster = current_directory_cluster;
+    
+    // If directory name provided, find it
+    if (dirname != 0 && dirname[0] != '\0') {
+        fat32_dir_entry_t entry;
+        if (fat32_find_file(dirname, current_directory_cluster, &entry) != 0) {
+            tty_putstr("Error: Directory not found: ");
+            tty_putstr(dirname);
+            tty_putstr("\n");
+            return -1;
+        }
+        
+        // Check if it's actually a directory
+        if (!(entry.attributes & FAT_ATTR_DIRECTORY)) {
+            tty_putstr("Error: Not a directory: ");
+            tty_putstr(dirname);
+            tty_putstr("\n");
+            return -1;
+        }
+        
+        target_cluster = ((uint32_t)entry.first_cluster_high << 16) | entry.first_cluster_low;
+    }
+    
+    // List the target directory
+    return fat32_list_directory(target_cluster);
+}
+
+// Get current directory cluster
+uint32_t fat32_get_current_directory(void) {
+    return current_directory_cluster;
+}
+
+// Get current directory path
+void fat32_get_current_path(char* path, int max_len) {
+    // Copy the full path
+    int i = 0;
+    while (i < max_len - 1 && current_full_path[i] != '\0') {
+        path[i] = current_full_path[i];
+        i++;
+    }
+    path[i] = '\0';
 }
