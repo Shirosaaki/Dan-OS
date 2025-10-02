@@ -18,19 +18,19 @@ static const char scancode_to_ascii[] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // F1-F10
     0, // Num lock
     0, // Scroll lock
-    0, // Home
-    0, // Up arrow
-    0, // Page up
-    '-',
-    0, // Left arrow
-    0,
-    0, // Right arrow
-    '+',
-    0, // End
-    0, // Down arrow
-    0, // Page down
-    0, // Insert
-    0, // Delete
+    '7', // Numpad Home (0x47)
+    '8', // Numpad Up arrow (0x48)
+    '9', // Numpad Page up (0x49)
+    '-', // Numpad minus (0x4A)
+    '4', // Numpad Left arrow (0x4B)
+    '5', // Numpad center (0x4C)
+    '6', // Numpad Right arrow (0x4D)
+    '+', // Numpad plus (0x4E)
+    '1', // Numpad End (0x4F)
+    '2', // Numpad Down arrow (0x50)
+    '3', // Numpad Page down (0x51)
+    '0', // Numpad Insert (0x52)
+    '.', // Numpad Delete (0x53)
     0, 0, 0,
     0, 0 // F11, F12
 };
@@ -51,19 +51,19 @@ static const char scancode_to_ascii_shift[] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // F1-F10
     0, // Num lock
     0, // Scroll lock
-    0, // Home
-    0, // Up arrow
-    0, // Page up
-    '-',
-    0, // Left arrow
-    0,
-    0, // Right arrow
-    '+',
-    0, // End
-    0, // Down arrow
-    0, // Page down
-    0, // Insert
-    0, // Delete
+    '7', // Numpad Home (0x47)
+    '8', // Numpad Up arrow (0x48)
+    '9', // Numpad Page up (0x49)
+    '-', // Numpad minus (0x4A)
+    '4', // Numpad Left arrow (0x4B)
+    '5', // Numpad center (0x4C)
+    '6', // Numpad Right arrow (0x4D)
+    '+', // Numpad plus (0x4E)
+    '1', // Numpad End (0x4F)
+    '2', // Numpad Down arrow (0x50)
+    '3', // Numpad Page down (0x51)
+    '0', // Numpad Insert (0x52)
+    '.', // Numpad Delete (0x53)
     0, 0, 0,
     0, 0 // F11, F12
 };
@@ -72,6 +72,7 @@ static const char scancode_to_ascii_shift[] = {
 static int shift_pressed = 0;
 static int caps_lock = 0;
 static int ctrl_pressed = 0;
+static int num_lock = 1; // Numpad starts enabled
 
 // Keyboard buffer
 #define KEYBOARD_BUFFER_SIZE 256
@@ -86,6 +87,7 @@ void keyboard_init(void) {
     buffer_write = 0;
     shift_pressed = 0;
     caps_lock = 0;
+    num_lock = 1; // Enable numlock by default
     
     // Enable keyboard interrupts (unmask IRQ1)
     uint8_t mask = inb(0x21);
@@ -105,6 +107,7 @@ static void keyboard_buffer_add(char c) {
 // Handle keyboard interrupt
 void keyboard_handler(void) {
     uint8_t scancode = inb(KEYBOARD_DATA_PORT);
+    char c = 0;
     
     // Check if key is released (scancode has bit 7 set)
     if (scancode & 0x80) {
@@ -144,16 +147,78 @@ void keyboard_handler(void) {
         return;
     }
     
-    // Convert scancode to ASCII
-    char c = 0;
-    if (scancode < sizeof(scancode_to_ascii)) {
-        if (shift_pressed) {
-            c = scancode_to_ascii_shift[scancode];
+    if (scancode == 0x45) {
+        // Num lock toggle
+        num_lock = !num_lock;
+        return;
+    }
+    
+    // Handle some common extended scancodes directly
+    if (scancode == 0x9C) {
+        // Numpad Enter (extended scancode 0x1C with 0xE0 prefix)
+        c = '\n';
+        keyboard_buffer_add(c);
+        
+        if (tty_is_editor_mode()) {
+            tty_putchar('\n');
+            tty_editor_add_char(c);
         } else {
-            c = scancode_to_ascii[scancode];
-            // Apply caps lock to letters
-            if (caps_lock && c >= 'a' && c <= 'z') {
-                c = c - 'a' + 'A';
+            tty_putchar('\n');
+            tty_process_command();
+        }
+        return;
+    }
+    
+    if (scancode == 0xB5) {
+        // Numpad Division (extended scancode 0x35 with 0xE0 prefix)
+        c = '/';
+        keyboard_buffer_add(c);
+        
+        if (tty_is_editor_mode()) {
+            tty_putchar(c);
+            tty_editor_add_char(c);
+        } else {
+            tty_putchar(c);
+        }
+        return;
+    }
+    
+    // Handle numpad multiply (scancode 0x37)
+    if (scancode == 0x37) {
+        c = '*';
+        keyboard_buffer_add(c);
+        
+        if (tty_is_editor_mode()) {
+            tty_putchar(c);
+            tty_editor_add_char(c);
+        } else {
+            tty_putchar(c);
+        }
+        return;
+    }
+    
+    // Convert scancode to ASCII
+    if (scancode < sizeof(scancode_to_ascii)) {
+        // Check if this is a numpad key (scancodes 0x47-0x53)
+        if (scancode >= 0x47 && scancode <= 0x53) {
+            if (num_lock) {
+                // Num lock is on - use numeric values
+                c = scancode_to_ascii[scancode];
+            } else {
+                // Num lock is off - numpad acts as navigation keys
+                // For now, we'll just ignore these when num lock is off
+                c = 0;
+            }
+        } else {
+            // Regular key handling
+            if (shift_pressed) {
+                c = scancode_to_ascii_shift[scancode];
+            } else {
+                c = scancode_to_ascii[scancode];
+                // Apply caps lock to letters
+                if (caps_lock && c >= 'a' && c <= 'z') {
+                    c = c - 'a' + 'A';
+                }
             }
         }
         
