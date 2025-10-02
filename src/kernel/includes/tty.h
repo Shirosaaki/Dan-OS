@@ -18,5 +18,6 @@
 	void set_cursor_offset(size_t offset);
 	void tty_backspace(void);
 	void tty_process_command(void);
+	void tty_putchar_internal(char c);
 
 #endif //PRINT_H

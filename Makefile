@@ -32,6 +32,7 @@ LINKER 		= 	src/linker/linker.ld
 ISO 		= 	build/x86_64/$(NAME).iso
 ISO_TARGET 	= 	target/x86_64/iso
 BUILD 		= 	build/x86_64
+DISK_IMG 	= 	build/disk.img
 TRASH 		= 	obj build $(BIN)
 INCLUDE 	= 	src/kernel/includes
 
@@ -85,15 +86,35 @@ re: clean build
 
 .PHONY: run
 run:
+	@ qemu-system-x86_64 -cdrom $(ISO) -drive file=$(DISK_IMG),format=raw -boot d
+
+.PHONY: run-no-disk
+run-no-disk:
 	@ qemu-system-x86_64 -cdrom $(ISO)
+
+.PHONY: run-docker
+run-docker:
+	@ docker exec -it $$(docker ps -q) bash -c "cd /root/env && qemu-system-x86_64 -cdrom $(ISO) -drive file=$(DISK_IMG),format=raw"
+
+.PHONY: disk
+disk:
+	@ bash create_disk_mtools.sh
+
+.PHONY: disk-docker
+disk-docker:
+	@ docker exec -it $$(docker ps -q) bash -c "cd /root/env && bash create_disk_mtools.sh"
 
 .PHONY: help
 help:
 	@ echo "Usage: make [target]"
 	@ echo "Targets:"
-	@ echo "  build: Build the kernel"
-	@ echo "  clean: Clean the build"
-	@ echo "  re: Clean and build the kernel"
-	@ echo "  run: Run the kernel"
-	@ echo "  help: Show this message"
+	@ echo "  build        : Build the kernel"
+	@ echo "  clean        : Clean the build"
+	@ echo "  re           : Clean and build the kernel"
+	@ echo "  run          : Run the kernel with disk (use this!)"
+	@ echo "  run-no-disk  : Run without disk"
+	@ echo "  run-docker   : Run in Docker (if permission issues)"
+	@ echo "  disk         : Create FAT32 disk image"
+	@ echo "  disk-docker  : Create disk in Docker"
+	@ echo "  help         : Show this message"
 

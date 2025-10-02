@@ -1,7 +1,6 @@
 #include "keyboard.h"
 #include "tty.h"
 #include "../../cpu/ports.h"
-#include "../commands/commands.h"
 
 // Scancode to ASCII table (US QWERTY layout)
 static const char scancode_to_ascii[] = {
