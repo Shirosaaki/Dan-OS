@@ -38,11 +38,11 @@ static const char scancode_to_ascii[] = {
 // Scancode to ASCII table with shift (US QWERTY layout)
 static const char scancode_to_ascii_shift[] = {
     0,  27, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '\b',
-    '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}', '\n',
+    '\t', 'A', 'Z', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}', '\n',
     0, // Control
-    'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~',
+    'Q', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', 'M', '"', '~',
     0, // Left shift
-    '|', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?',
+    '|', 'W', 'X', 'C', 'V', 'B', 'N', ':', '<', '>', '?',
     0, // Right shift
     '*',
     0, // Alt
