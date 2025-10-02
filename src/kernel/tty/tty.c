@@ -8,16 +8,17 @@
 #include "vga.h"
 #include "../../cpu/ports.h"
 
-static size_t tty_row;
-static size_t tty_column;
-static uint8_t tty_color;
+// Make these non-static so they can be accessed from commands.c
+size_t tty_row;
+size_t tty_column;
+uint8_t tty_color;
 static uint16_t* tty_buffer;
 static uint16_t* const VGA_MEMORY = VGA_BUFFER;
 
 // Command buffer
 #define CMD_BUFFER_SIZE 256
-static char cmd_buffer[CMD_BUFFER_SIZE];
-static int cmd_buffer_pos = 0;
+char cmd_buffer[CMD_BUFFER_SIZE];
+int cmd_buffer_pos = 0;
 
 static inline uint8_t vga_entry_color(enum VGA_COLOR fg, enum VGA_COLOR bg) {
     return fg | bg << 4;
@@ -53,6 +54,24 @@ void tty_setcolor(uint8_t color) {
     tty_color = color;
 }
 
+// Scroll the screen up by one line
+static void tty_scroll(void) {
+    // Move all lines up by one
+    for (size_t y = 0; y < VGA_HEIGHT - 1; y++) {
+        for (size_t x = 0; x < VGA_WIDTH; x++) {
+            const size_t dst_index = y * VGA_WIDTH + x;
+            const size_t src_index = (y + 1) * VGA_WIDTH + x;
+            tty_buffer[dst_index] = tty_buffer[src_index];
+        }
+    }
+    
+    // Clear the last line
+    for (size_t x = 0; x < VGA_WIDTH; x++) {
+        const size_t index = (VGA_HEIGHT - 1) * VGA_WIDTH + x;
+        tty_buffer[index] = vga_entry(' ', tty_color);
+    }
+}
+
 void tty_putchar_at(unsigned char c, uint8_t color, size_t x, size_t y) {
     if (c == '\n') {
         tty_column = 0;
@@ -68,11 +87,12 @@ void tty_putchar_at(unsigned char c, uint8_t color, size_t x, size_t y) {
 }
 
 // Internal version for printing that doesn't add to command buffer
-static void tty_putchar_internal(char c) {
+void tty_putchar_internal(char c) {
     if (c == '\n') {
         tty_column = 0;
         tty_row++;
         if (tty_row >= VGA_HEIGHT) {
+            tty_scroll();
             tty_row = VGA_HEIGHT - 1;
         }
         set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
@@ -82,12 +102,14 @@ static void tty_putchar_internal(char c) {
     unsigned char uc = c;
     tty_putchar_at(uc, tty_color, tty_column, tty_row);
     
-    if (tty_column >= VGA_WIDTH - 1) {
+    if (tty_column >= VGA_WIDTH) {
         tty_column = 0;
         tty_row++;
         if (tty_row >= VGA_HEIGHT) {
+            tty_scroll();
             tty_row = VGA_HEIGHT - 1;
         }
+        set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
     }
 }
 
@@ -98,6 +120,36 @@ void tty_putchar(char c) {
         cmd_buffer[cmd_buffer_pos++] = c;
     }
     tty_putchar_internal(c);
+}
+
+void tty_putnbr(int num) {
+    if (num == 0) {
+        tty_putchar('0');
+        return;
+    }
+    
+    char buffer[20];
+    int i = 0;
+    int is_negative = 0;
+    
+    if (num < 0) {
+        is_negative = 1;
+        num = -num;
+    }
+    
+    while (num > 0) {
+        buffer[i++] = (num % 10) + '0';
+        num /= 10;
+    }
+    
+    if (is_negative) {
+        buffer[i++] = '-';
+    }
+    
+    // Print the number in reverse
+    for (int j = i - 1; j >= 0; j--) {
+        tty_putchar(buffer[j]);
+    }
 }
 
 void tty_putstr(const char* data) {
@@ -141,57 +193,4 @@ void tty_backspace(void) {
         tty_buffer[index] = vga_entry(' ', tty_color);
         set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
     }
-}
-
-// String comparison helper
-static int str_compare(const char* str1, const char* str2) {
-    int i = 0;
-    while (str1[i] != '\0' && str2[i] != '\0') {
-        if (str1[i] != str2[i]) {
-            return 0;
-        }
-        i++;
-    }
-    return str1[i] == str2[i];
-}
-
-// Process command when Enter is pressed
-void tty_process_command(void) {
-    cmd_buffer[cmd_buffer_pos] = '\0'; // Null terminate
-    
-    // Process the command
-    if (cmd_buffer_pos > 0) {
-        if (str_compare(cmd_buffer, "help")) {
-            tty_putstr("Available commands:\n");
-            tty_putstr("  help   - Show this help message\n");
-            tty_putstr("  clear  - Clear the screen\n");
-            tty_putstr("  echo   - Echo back the input\n");
-            tty_putstr("  about  - Show OS information\n");
-        } else if (str_compare(cmd_buffer, "clear")) {
-            tty_clear();
-            tty_row = 0;
-            tty_column = 0;
-        } else if (str_compare(cmd_buffer, "about")) {
-            tty_putstr("DanOS - A simple 64-bit operating system\n");
-            tty_putstr("Version: 0.1\n");
-            tty_putstr("Author: dan13615\n");
-        } else if (cmd_buffer[0] == 'e' && cmd_buffer[1] == 'c' && 
-                   cmd_buffer[2] == 'h' && cmd_buffer[3] == 'o' && 
-                   cmd_buffer[4] == ' ') {
-            // Echo command
-            for (int i = 5; i < cmd_buffer_pos; i++) {
-                tty_putchar(cmd_buffer[i]);
-            }
-            tty_putchar('\n');
-        } else {
-            tty_putstr("Unknown command: ");
-            tty_putstr(cmd_buffer);
-            tty_putstr("\n");
-            tty_putstr("Type 'help' for available commands.\n");
-        }
-    }
-    
-    // Reset command buffer
-    cmd_buffer_pos = 0;
-    tty_putstr("> ");
 }
