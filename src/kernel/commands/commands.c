@@ -5,6 +5,7 @@
 #include "commands.h"
 #include "fat32.h"
 #include "ata.h"
+#include "rtc.h"
 
 extern void tty_putchar_internal(char c);
 extern size_t tty_row;
@@ -36,6 +37,8 @@ void tty_process_command(void) {
             tty_putstr("  md       - Create directory (md dirname)\n");
             tty_putstr("  cd       - Change directory (cd path, supports ../.. and folder/subfolder)\n");
             tty_putstr("  rmdir    - Remove directory and all contents (rmdir dirname)\n");
+            tty_putstr("  time     - Display current time and date\n");
+            tty_putstr("  timezone - Set timezone (timezone +/-H:M NAME or timezone list)\n");
             tty_putstr("  disk     - Show disk information\n");
         } else if (strncmp(cmd_buffer, "cls", 3) == 0) {
             tty_clear();
@@ -414,6 +417,176 @@ void tty_process_command(void) {
             } else {
                 fat32_rename_file(old_name, new_name);
             }
+        } else if (strncmp(cmd_buffer, "time", 4) == 0 && (strlength(cmd_buffer) == 4 || cmd_buffer[4] == ' ')) {
+            // Display current local time and date
+            rtc_time_t local_time;
+            rtc_read_local_time(&local_time);
+            
+            timezone_t current_tz;
+            timezone_get(&current_tz);
+            
+            char time_str[16];
+            char date_str[16];
+            rtc_format_time_string(&local_time, time_str);
+            rtc_format_date_string(&local_time, date_str);
+            
+            tty_putstr("Current time: ");
+            tty_putstr(time_str);
+            tty_putstr(" ");
+            tty_putstr(current_tz.name);
+            tty_putstr("\n");
+            tty_putstr("Current date: ");
+            tty_putstr(date_str);
+            tty_putstr("\n");
+        } else if (strncmp(cmd_buffer, "date ", 5) == 0) {
+            // Set time and date: date HH:MM:SS DD/MM/YYYY
+            rtc_time_t new_time;
+            
+            // Parse the input: "date HH:MM:SS DD/MM/YYYY"
+            if (strlength(cmd_buffer) >= 24) {
+                // Extract HH:MM:SS
+                new_time.hours = (cmd_buffer[5] - '0') * 10 + (cmd_buffer[6] - '0');
+                new_time.minutes = (cmd_buffer[8] - '0') * 10 + (cmd_buffer[9] - '0');
+                new_time.seconds = (cmd_buffer[11] - '0') * 10 + (cmd_buffer[12] - '0');
+                
+                // Extract DD/MM/YYYY
+                new_time.day = (cmd_buffer[14] - '0') * 10 + (cmd_buffer[15] - '0');
+                new_time.month = (cmd_buffer[17] - '0') * 10 + (cmd_buffer[18] - '0');
+                new_time.year = (cmd_buffer[20] - '0') * 1000 + (cmd_buffer[21] - '0') * 100 +
+                               (cmd_buffer[22] - '0') * 10 + (cmd_buffer[23] - '0');
+                
+                // Validate ranges
+                if (new_time.hours < 24 && new_time.minutes < 60 && new_time.seconds < 60 &&
+                    new_time.day >= 1 && new_time.day <= 31 && 
+                    new_time.month >= 1 && new_time.month <= 12 &&
+                    new_time.year >= 1970 && new_time.year <= 2099) {
+                    
+                    rtc_set_time(&new_time);
+                    tty_putstr("Time and date updated successfully!\n");
+                    
+                    // Show the new time
+                    char time_str[16];
+                    char date_str[16];
+                    rtc_format_time_string(&new_time, time_str);
+                    rtc_format_date_string(&new_time, date_str);
+                    
+                    tty_putstr("New time: ");
+                    tty_putstr(time_str);
+                    tty_putstr(" ");
+                    tty_putstr(date_str);
+                    tty_putstr("\n");
+                } else {
+                    tty_putstr("Error: Invalid time or date values\n");
+                    tty_putstr("Valid ranges: HH(00-23) MM(00-59) SS(00-59) DD(01-31) MM(01-12) YYYY(1970-2099)\n");
+                }
+            } else {
+                tty_putstr("Usage: date HH:MM:SS DD/MM/YYYY\n");
+                tty_putstr("Example: date 14:30:00 25/12/2025\n");
+            }
+        } else if (strncmp(cmd_buffer, "timezone ", 9) == 0) {
+            // Set timezone: timezone +/-H:M NAME or timezone list
+            tty_putstr("DEBUG: Processing timezone command\n");
+            if (strncmp(cmd_buffer + 9, "list", 4) == 0) {
+                // Show common timezones
+                tty_putstr("Common timezones:\n");
+                tty_putstr("  UTC    +0:00   Coordinated Universal Time\n");
+                tty_putstr("  GMT    +0:00   Greenwich Mean Time\n");
+                tty_putstr("  EST    -5:00   Eastern Standard Time\n");
+                tty_putstr("  CST    -6:00   Central Standard Time\n");
+                tty_putstr("  MST    -7:00   Mountain Standard Time\n");
+                tty_putstr("  PST    -8:00   Pacific Standard Time\n");
+                tty_putstr("  CET    +1:00   Central European Time\n");
+                tty_putstr("  JST    +9:00   Japan Standard Time\n");
+                tty_putstr("  AEST  +10:00   Australian Eastern Standard Time\n");
+                tty_putstr("\nUsage: timezone +/-H:M NAME\n");
+                tty_putstr("Example: timezone -5:00 EST\n");
+            } else if (strlength(cmd_buffer) >= 15) {
+                // Parse timezone: +/-H:M NAME
+                char sign = cmd_buffer[9];
+                if (sign == '+' || sign == '-') {
+                    int8_t hours = (cmd_buffer[10] - '0') * 10 + (cmd_buffer[11] - '0');
+                    int8_t minutes = (cmd_buffer[13] - '0') * 10 + (cmd_buffer[14] - '0');
+                    
+                    if (sign == '-') {
+                        hours = -hours;
+                        minutes = -minutes;
+                    }
+                    
+                    // Validate ranges
+                    if (hours >= -12 && hours <= 14 && minutes >= -59 && minutes <= 59) {
+                        // Extract name (skip space after minutes)
+                        char tz_name[8] = {0};
+                        int name_start = 16; // Position after "H:M "
+                        int name_len = 0;
+                        
+                        while (name_start < strlength(cmd_buffer) && name_len < 7) {
+                            tz_name[name_len++] = cmd_buffer[name_start++];
+                        }
+                        tz_name[name_len] = '\0';
+                        
+                        if (name_len > 0) {
+                            timezone_set(hours, minutes, tz_name);
+                            
+                            tty_putstr("Timezone set to: ");
+                            tty_putstr(tz_name);
+                            tty_putstr(" (");
+                            if (hours >= 0) tty_putstr("+");
+                            
+                            // Simple number display for hours
+                            if (hours < 0) {
+                                tty_putstr("-");
+                                hours = -hours;
+                            }
+                            if (hours >= 10) tty_putchar('0' + hours / 10);
+                            tty_putchar('0' + hours % 10);
+                            tty_putstr(":");
+                            
+                            // Minutes
+                            if (minutes < 0) minutes = -minutes;
+                            tty_putchar('0' + minutes / 10);
+                            tty_putchar('0' + minutes % 10);
+                            tty_putstr(")\n");
+                        } else {
+                            tty_putstr("Error: Timezone name required\n");
+                        }
+                    } else {
+                        tty_putstr("Error: Invalid timezone offset\n");
+                        tty_putstr("Valid range: -12:00 to +14:00\n");
+                    }
+                } else {
+                    tty_putstr("Error: Invalid format. Use +/- prefix\n");
+                }
+            } else {
+                tty_putstr("Usage: timezone +/-H:M NAME or timezone list\n");
+                tty_putstr("Example: timezone -5:00 EST\n");
+                tty_putstr("Example: timezone +1:00 CET\n");
+                tty_putstr("Type 'timezone list' to see common timezones\n");
+            }
+        } else if (strncmp(cmd_buffer, "timezone", 8) == 0 && strlength(cmd_buffer) == 8) {
+            // Show current timezone
+            tty_putstr("DEBUG: Processing timezone status command\n");
+            timezone_t current_tz;
+            timezone_get(&current_tz);
+            
+            tty_putstr("Current timezone: ");
+            tty_putstr(current_tz.name);
+            tty_putstr(" (");
+            
+            if (current_tz.offset_hours >= 0) tty_putstr("+");
+            else {
+                tty_putstr("-");
+                current_tz.offset_hours = -current_tz.offset_hours;
+            }
+            
+            if (current_tz.offset_hours >= 10) tty_putchar('0' + current_tz.offset_hours / 10);
+            tty_putchar('0' + current_tz.offset_hours % 10);
+            tty_putstr(":");
+            
+            int8_t minutes = current_tz.offset_minutes;
+            if (minutes < 0) minutes = -minutes;
+            tty_putchar('0' + minutes / 10);
+            tty_putchar('0' + minutes % 10);
+            tty_putstr(")\n");
         } else {
             tty_putstr("Unknown command: ");
             tty_putstr(cmd_buffer);

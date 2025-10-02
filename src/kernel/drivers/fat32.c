@@ -2,6 +2,7 @@
 #include "ata.h"
 #include "tty.h"
 #include "string.h"
+#include "rtc.h"
 
 static fat32_boot_sector_t boot_sector;
 static uint32_t fat_start_lba;
@@ -365,18 +366,25 @@ int fat32_read_file(fat32_file_t* file, uint8_t* buffer, uint32_t size) {
     return bytes_read;
 }
 
-// Get current FAT32 date (simplified - just return a default)
+// Get current FAT32 date from RTC
 uint16_t fat32_get_current_date(void) {
+    rtc_time_t current_time;
+    rtc_read_time(&current_time);
+    
     // Format: (year-1980) << 9 | month << 5 | day
-    // Default: 2025-10-02
-    return ((2025 - 1980) << 9) | (10 << 5) | 2;
+    uint16_t year = current_time.year;
+    if (year < 1980) year = 1980; // FAT32 epoch
+    
+    return ((year - 1980) << 9) | (current_time.month << 5) | current_time.day;
 }
 
-// Get current FAT32 time (simplified - just return a default)
+// Get current FAT32 time from RTC  
 uint16_t fat32_get_current_time(void) {
+    rtc_time_t current_time;
+    rtc_read_time(&current_time);
+    
     // Format: hour << 11 | minute << 5 | (second / 2)
-    // Default: 12:00:00
-    return (12 << 11) | (0 << 5) | (0);
+    return (current_time.hours << 11) | (current_time.minutes << 5) | (current_time.seconds / 2);
 }
 
 // Set FAT entry (write to FAT)
