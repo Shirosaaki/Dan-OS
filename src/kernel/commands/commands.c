@@ -27,6 +27,8 @@ void tty_process_command(void) {
             tty_putstr("  ls       - List files in current directory\n");
             tty_putstr("  rd       - Display file contents\n");
             tty_putstr("  ct       - Create file (ct filename content)\n");
+            tty_putstr("  rm       - Delete file (rm filename or rm *)\n");
+            tty_putstr("  wr       - Text editor (wr filename, Ctrl to save)\n");
             tty_putstr("  disk     - Show disk information\n");
         } else if (strncmp(cmd_buffer, "cls", 3) == 0) {
             tty_clear();
@@ -84,6 +86,69 @@ void tty_process_command(void) {
             // Show disk info
             tty_putstr("Identifying disk...\n");
             ata_identify();
+        } else if (strncmp(cmd_buffer, "rm ", 3) == 0) {
+            // Remove file: rm filename or rm *
+            char filename[32];
+            int j = 0;
+            
+            // Skip initial spaces after "rm"
+            int i = 3;
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] == ' ') i++;
+            
+            // Get the argument
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] != ' ' && j < 31) {
+                filename[j++] = cmd_buffer[i++];
+            }
+            filename[j] = '\0';
+            
+            if (filename[0] == '\0') {
+                tty_putstr("Usage: rm filename  or  rm *\n");
+                tty_putstr("Example: rm test.txt\n");
+                tty_putstr("Example: rm * (deletes all files)\n");
+            } else if (strncmp(filename, "*", 1) == 0) {
+                // Delete all files
+                tty_putstr("Deleting all files...\n");
+                tty_putstr("Are you sure? This will delete ALL files!\n");
+                tty_putstr("Proceeding in 1 second...\n");
+                
+                // Simple delay (not perfect but works for demo)
+                for (volatile int delay = 0; delay < 1000000; delay++);
+                
+                if (fat32_delete_all_files() == 0) {
+                    tty_putstr("All files deleted successfully!\n");
+                } else {
+                    tty_putstr("Error deleting files\n");
+                }
+            } else {
+                // Delete single file
+                tty_putstr("Deleting file: ");
+                tty_putstr(filename);
+                tty_putstr("\n");
+                
+                if (fat32_delete_file(filename) == 0) {
+                    // Success message is printed by fat32_delete_file
+                } else {
+                    // Error message is printed by fat32_delete_file
+                }
+            }
+        } else if (strncmp(cmd_buffer, "wr ", 3) == 0) {
+            // Text editor: wr filename
+            char filename[32];
+            int j = 0;
+            for (int i = 3; i < strlength(cmd_buffer) && j < 31; i++, j++) {
+                filename[j] = cmd_buffer[i];
+            }
+            filename[j] = '\0';
+            
+            if (filename[0] == '\0') {
+                tty_putstr("Usage: wr filename\n");
+                tty_putstr("Example: wr document.txt\n");
+                tty_putstr("Press Ctrl to save and exit editor\n");
+            } else {
+                // Start editor mode
+                tty_start_editor_mode(filename);
+                return; // Don't print prompt, we're in editor mode
+            }
         } else if (strncmp(cmd_buffer, "ct ", 3) == 0) {
             // Create file: ct filename content
             // Parse filename and content
@@ -124,13 +189,13 @@ void tty_process_command(void) {
                 }
                 tty_putstr("\n");
                 
-                if (fat32_create_file(filename, content, j) == 0) {
-                    tty_putstr("File created successfully!\n");
+                if (fat32_update_file(filename, content, j) == 0) {
+                    tty_putstr("File saved successfully!\n");
                     tty_putstr("Use 'ls' to see it, 'rd ");
                     tty_putstr(filename);
                     tty_putstr("' to read it\n");
                 } else {
-                    tty_putstr("Error creating file\n");
+                    tty_putstr("Error saving file\n");
                 }
             }
         } else {

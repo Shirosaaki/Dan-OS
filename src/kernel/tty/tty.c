@@ -7,6 +7,7 @@
 #include "tty.h"
 #include "vga.h"
 #include "../../cpu/ports.h"
+#include "fat32.h"
 
 // Make these non-static so they can be accessed from commands.c
 size_t tty_row;
@@ -19,6 +20,13 @@ static uint16_t* const VGA_MEMORY = VGA_BUFFER;
 #define CMD_BUFFER_SIZE 256
 char cmd_buffer[CMD_BUFFER_SIZE];
 int cmd_buffer_pos = 0;
+
+// Editor mode variables
+static int editor_mode = 0;
+static char editor_filename[64];
+#define EDITOR_BUFFER_SIZE 2048
+static char editor_buffer[EDITOR_BUFFER_SIZE];
+static int editor_buffer_pos = 0;
 
 static inline uint8_t vga_entry_color(enum VGA_COLOR fg, enum VGA_COLOR bg) {
     return fg | bg << 4;
@@ -192,5 +200,147 @@ void tty_backspace(void) {
         const size_t index = tty_row * VGA_WIDTH + tty_column;
         tty_buffer[index] = vga_entry(' ', tty_color);
         set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+    }
+}
+
+// Start editor mode
+void tty_start_editor_mode(const char* filename) {
+    editor_mode = 1;
+    editor_buffer_pos = 0;
+    
+    // Copy filename
+    int i = 0;
+    while (filename[i] && i < 63) {
+        editor_filename[i] = filename[i];
+        i++;
+    }
+    editor_filename[i] = '\0';
+    
+    // Clear editor buffer
+    for (int j = 0; j < EDITOR_BUFFER_SIZE; j++) {
+        editor_buffer[j] = '\0';
+    }
+    
+    // Try to load existing file content
+    fat32_file_t file;
+    int file_exists = 0;
+    if (fat32_open_file(filename, &file) == 0) {
+        file_exists = 1;
+        // Load existing content into editor buffer
+        uint32_t bytes_to_read = file.file_size;
+        if (bytes_to_read >= EDITOR_BUFFER_SIZE) {
+            bytes_to_read = EDITOR_BUFFER_SIZE - 1; // Leave space for null terminator
+        }
+        
+        int bytes_read = fat32_read_file(&file, (uint8_t*)editor_buffer, bytes_to_read);
+        if (bytes_read > 0) {
+            editor_buffer_pos = bytes_read;
+            // Ensure null termination
+            if (editor_buffer_pos < EDITOR_BUFFER_SIZE) {
+                editor_buffer[editor_buffer_pos] = '\0';
+            }
+        }
+    }
+    
+    // Clear screen and show editor interface
+    tty_clear();
+    tty_row = 0;
+    tty_column = 0;
+    
+    tty_putstr("--- Text Editor Mode ---\n");
+    tty_putstr("Editing: ");
+    tty_putstr(filename);
+    if (file_exists) {
+        tty_putstr(" (loaded existing content)");
+    } else {
+        tty_putstr(" (new file)");
+    }
+    tty_putstr("\n");
+    tty_putstr("Press Ctrl to save and exit\n");
+    tty_putstr("------------------------\n\n");
+    
+    // Display existing content if any
+    if (editor_buffer_pos > 0) {
+        for (int j = 0; j < editor_buffer_pos; j++) {
+            char c = editor_buffer[j];
+            if (c >= 32 && c < 127) {
+                tty_putchar_internal(c);
+            } else if (c == '\n') {
+                tty_putchar_internal('\n');
+            } else if (c == '\r') {
+                // Skip carriage returns
+            } else {
+                // Replace unprintable characters with '?'
+                tty_putchar_internal('?');
+            }
+        }
+    }
+}
+
+// Exit editor mode and save file
+void tty_exit_editor_mode(void) {
+    if (!editor_mode) return;
+    
+    editor_mode = 0;
+    
+    // Clear screen and return to normal mode
+    tty_clear();
+    tty_row = 0;
+    tty_column = 0;
+    
+    // Null terminate the editor buffer
+    if (editor_buffer_pos < EDITOR_BUFFER_SIZE) {
+        editor_buffer[editor_buffer_pos] = '\0';
+    }
+    
+    tty_putstr("Saving file: ");
+    tty_putstr(editor_filename);
+    tty_putstr(" (");
+    // Simple number display for buffer size
+    if (editor_buffer_pos == 0) tty_putstr("0");
+    else if (editor_buffer_pos < 10) {
+        char num = '0' + editor_buffer_pos;
+        tty_putchar_internal(num);
+    } else {
+        tty_putstr("many");
+    }
+    tty_putstr(" bytes)\n");
+    
+    // Save file using FAT32 with dynamic sizing
+    int result = fat32_update_file(editor_filename, (uint8_t*)editor_buffer, editor_buffer_pos);
+    
+    if (result == 0) {
+        tty_putstr("File saved successfully: ");
+        tty_putstr(editor_filename);
+        tty_putstr("\n");
+    } else {
+        tty_putstr("Error: Could not save file ");
+        tty_putstr(editor_filename);
+        tty_putstr("\n");
+        tty_putstr("Check if FAT32 is initialized and disk is available\n");
+    }
+    cmd_buffer_pos = 0; // Clear command buffer
+    cmd_buffer[0] = '\0';
+    tty_putstr("\n> ");
+    //tty_putstr("DanOS> ");
+}
+
+// Check if in editor mode
+int tty_is_editor_mode(void) {
+    return editor_mode;
+}
+
+// Add character to editor buffer
+void tty_editor_add_char(char c) {
+    if (editor_buffer_pos < EDITOR_BUFFER_SIZE - 1) {
+        editor_buffer[editor_buffer_pos++] = c;
+    }
+}
+
+// Handle backspace in editor
+void tty_editor_backspace(void) {
+    if (editor_buffer_pos > 0) {
+        editor_buffer_pos--;
+        editor_buffer[editor_buffer_pos] = '\0';
     }
 }

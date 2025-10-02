@@ -90,9 +90,15 @@ void fat32_print_file_info(fat32_dir_entry_t* entry);
 // Write operations
 int fat32_create_file(const char* filename, const uint8_t* data, uint32_t size);
 int fat32_write_file(fat32_file_t* file, const uint8_t* buffer, uint32_t size);
+int fat32_delete_file(const char* filename);
+int fat32_delete_all_files(void);
+int fat32_update_file(const char* filename, const uint8_t* data, uint32_t new_size);
 uint32_t fat32_allocate_cluster(void);
 int fat32_set_next_cluster(uint32_t cluster, uint32_t value);
 int fat32_add_dir_entry(uint32_t dir_cluster, fat32_dir_entry_t* entry);
+int fat32_extend_cluster_chain(uint32_t last_cluster, uint32_t additional_clusters);
+int fat32_free_cluster_chain(uint32_t start_cluster);
+int fat32_update_dir_entry_size(const char* filename, uint32_t new_size);
 
 // Helper functions
 void fat32_parse_filename(const char* input, char* output);

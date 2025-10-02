@@ -71,6 +71,7 @@ static const char scancode_to_ascii_shift[] = {
 // Keyboard state
 static int shift_pressed = 0;
 static int caps_lock = 0;
+static int ctrl_pressed = 0;
 
 // Keyboard buffer
 #define KEYBOARD_BUFFER_SIZE 256
@@ -108,9 +109,12 @@ void keyboard_handler(void) {
     // Check if key is released (scancode has bit 7 set)
     if (scancode & 0x80) {
         scancode &= 0x7F;
-        // Handle shift release
+        // Handle key releases
         if (scancode == 0x2A || scancode == 0x36) {
             shift_pressed = 0;
+        }
+        if (scancode == 0x1D) { // Ctrl released
+            ctrl_pressed = 0;
         }
         return;
     }
@@ -119,6 +123,18 @@ void keyboard_handler(void) {
     if (scancode == 0x2A || scancode == 0x36) {
         // Left or right shift pressed
         shift_pressed = 1;
+        return;
+    }
+    
+    if (scancode == 0x1D) {
+        // Ctrl key pressed
+        ctrl_pressed = 1;
+        
+        // Check if in editor mode - if so, exit editor mode
+        #include "tty.h"
+        if (tty_is_editor_mode()) {
+            tty_exit_editor_mode();
+        }
         return;
     }
     
@@ -143,15 +159,33 @@ void keyboard_handler(void) {
         
         if (c != 0) {
             keyboard_buffer_add(c);
-            // Echo character to screen and handle special keys
-            if (c == '\b') {
-                tty_backspace();
-            } else if (c == '\n') {
-                tty_putchar('\n');
-                tty_process_command();
+            
+            // Check if in editor mode
+            #include "tty.h"
+            if (tty_is_editor_mode()) {
+                // In editor mode - handle differently
+                if (c == '\b') {
+                    tty_backspace();
+                    tty_editor_backspace();
+                } else if (c == '\n') {
+                    tty_putchar('\n');
+                    tty_editor_add_char(c);
+                } else {
+                    // Regular character in editor
+                    tty_putchar(c);
+                    tty_editor_add_char(c);
+                }
             } else {
-                // Regular character - just display it
-                tty_putchar(c);
+                // Normal mode - handle commands
+                if (c == '\b') {
+                    tty_backspace();
+                } else if (c == '\n') {
+                    tty_putchar('\n');
+                    tty_process_command();
+                } else {
+                    // Regular character - just display it
+                    tty_putchar(c);
+                }
             }
         }
     }

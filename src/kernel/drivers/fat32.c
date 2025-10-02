@@ -8,6 +8,7 @@ static uint32_t fat_start_lba;
 static uint32_t data_start_lba;
 static uint32_t root_dir_cluster;
 static uint32_t current_directory_cluster;
+static int fat32_initialized = 0;
 
 // Buffer for reading sectors
 static uint8_t sector_buffer[512];
@@ -29,6 +30,7 @@ int fat32_init(void) {
     root_dir_cluster = boot_sector.root_cluster;
     current_directory_cluster = root_dir_cluster;
     
+    fat32_initialized = 1;
     tty_putstr("FAT32 filesystem initialized successfully.\n");
     tty_putstr("Root cluster: ");
     
@@ -529,4 +531,375 @@ int fat32_create_file(const char* filename, const uint8_t* data, uint32_t size) 
     }
     
     return 0;
+}
+
+// Delete a file from the FAT32 filesystem
+int fat32_delete_file(const char* filename) {
+    if (!fat32_initialized) {
+        tty_putstr("Error: FAT32 not initialized\n");
+        return -1;
+    }
+    
+    char fat32_name[11];
+    fat32_parse_filename(filename, fat32_name);
+    
+    // Read root directory
+    uint32_t lba = fat32_cluster_to_lba(current_directory_cluster);
+    uint8_t sector_buffer[512];
+    
+    for (uint32_t sector = 0; sector < boot_sector.sectors_per_cluster; sector++) {
+        if (ata_read_sectors(lba + sector, 1, (uint16_t*)sector_buffer) != 0) {
+            return -1;
+        }
+        
+        fat32_dir_entry_t* entries = (fat32_dir_entry_t*)sector_buffer;
+        
+        for (int i = 0; i < 512 / sizeof(fat32_dir_entry_t); i++) {
+            // Check if entry is deleted or end of directory
+            if (entries[i].name[0] == 0x00) break;
+            if (entries[i].name[0] == 0xE5) continue; // Already deleted
+            
+            // Skip volume labels and directories
+            if (entries[i].attributes & FAT_ATTR_VOLUME_ID) continue;
+            if (entries[i].attributes & FAT_ATTR_DIRECTORY) continue;
+            
+            // Compare filenames
+            if (fat32_compare_names((char*)entries[i].name, fat32_name)) {
+                // Found the file - mark as deleted
+                entries[i].name[0] = 0xE5;
+                
+                // Get cluster chain and free it
+                uint32_t cluster = ((uint32_t)entries[i].first_cluster_high << 16) | entries[i].first_cluster_low;
+                
+                // Free cluster chain in FAT
+                while (cluster >= 2 && cluster < 0x0FFFFFF8) {
+                    uint32_t next_cluster = fat32_get_next_cluster(cluster);
+                    fat32_set_next_cluster(cluster, 0); // Mark as free
+                    cluster = next_cluster;
+                }
+                
+                // Write back the modified directory entry
+                if (ata_write_sectors(lba + sector, 1, (uint16_t*)sector_buffer) != 0) {
+                    tty_putstr("Error: Could not update directory\n");
+                    return -1;
+                }
+                
+                tty_putstr("File deleted: ");
+                tty_putstr(filename);
+                tty_putstr("\n");
+                return 0;
+            }
+        }
+    }
+    
+    tty_putstr("Error: File not found: ");
+    tty_putstr(filename);
+    tty_putstr("\n");
+    return -1;
+}
+
+// Delete all files from the FAT32 filesystem
+int fat32_delete_all_files(void) {
+    if (!fat32_initialized) {
+        tty_putstr("Error: FAT32 not initialized\n");
+        return -1;
+    }
+    
+    int deleted_count = 0;
+    
+    // Read root directory
+    uint32_t lba = fat32_cluster_to_lba(current_directory_cluster);
+    uint8_t sector_buffer[512];
+    
+    for (uint32_t sector = 0; sector < boot_sector.sectors_per_cluster; sector++) {
+        if (ata_read_sectors(lba + sector, 1, (uint16_t*)sector_buffer) != 0) {
+            return -1;
+        }
+        
+        fat32_dir_entry_t* entries = (fat32_dir_entry_t*)sector_buffer;
+        int sector_modified = 0;
+        
+        for (int i = 0; i < 512 / sizeof(fat32_dir_entry_t); i++) {
+            // Check if entry is end of directory
+            if (entries[i].name[0] == 0x00) break;
+            if (entries[i].name[0] == 0xE5) continue; // Already deleted
+            
+            // Skip volume labels and directories
+            if (entries[i].attributes & FAT_ATTR_VOLUME_ID) continue;
+            if (entries[i].attributes & FAT_ATTR_DIRECTORY) continue;
+            
+            // Found a file - mark as deleted
+            entries[i].name[0] = 0xE5;
+            sector_modified = 1;
+            deleted_count++;
+            
+            // Get cluster chain and free it
+            uint32_t cluster = ((uint32_t)entries[i].first_cluster_high << 16) | entries[i].first_cluster_low;
+            
+            // Free cluster chain in FAT
+            while (cluster >= 2 && cluster < 0x0FFFFFF8) {
+                uint32_t next_cluster = fat32_get_next_cluster(cluster);
+                fat32_set_next_cluster(cluster, 0); // Mark as free
+                cluster = next_cluster;
+            }
+            
+            // Print filename being deleted (convert from FAT32 format)
+            tty_putstr("Deleted: ");
+            for (int j = 0; j < 8; j++) {
+                if (entries[i].name[j] != ' ') {
+                    tty_putchar_internal(entries[i].name[j]);
+                }
+            }
+            if (entries[i].name[8] != ' ') {
+                tty_putchar_internal('.');
+                for (int j = 8; j < 11; j++) {
+                    if (entries[i].name[j] != ' ') {
+                        tty_putchar_internal(entries[i].name[j]);
+                    }
+                }
+            }
+            tty_putchar_internal('\n');
+        }
+        
+        // Write back the modified directory if needed
+        if (sector_modified) {
+            if (ata_write_sectors(lba + sector, 1, (uint16_t*)sector_buffer) != 0) {
+                tty_putstr("Error: Could not update directory\n");
+                return -1;
+            }
+        }
+    }
+    
+    if (deleted_count > 0) {
+        tty_putstr("Total files deleted: ");
+        // Simple number display
+        if (deleted_count < 10) {
+            char num = '0' + deleted_count;
+            tty_putchar_internal(num);
+        } else {
+            tty_putstr("many");
+        }
+        tty_putchar_internal('\n');
+    } else {
+        tty_putstr("No files to delete\n");
+    }
+    
+    return 0;
+}
+
+// Extend a cluster chain by adding additional clusters
+int fat32_extend_cluster_chain(uint32_t last_cluster, uint32_t additional_clusters) {
+    if (!fat32_initialized) {
+        return -1;
+    }
+    
+    uint32_t current_cluster = last_cluster;
+    
+    for (uint32_t i = 0; i < additional_clusters; i++) {
+        uint32_t new_cluster = fat32_allocate_cluster();
+        if (new_cluster == 0) {
+            tty_putstr("Error: No more free clusters available\n");
+            return -1;
+        }
+        
+        // Link the current cluster to the new one
+        if (fat32_set_next_cluster(current_cluster, new_cluster) != 0) {
+            return -1;
+        }
+        
+        // Mark the new cluster as end of chain
+        if (fat32_set_next_cluster(new_cluster, FAT32_EOC) != 0) {
+            return -1;
+        }
+        
+        current_cluster = new_cluster;
+    }
+    
+    return 0;
+}
+
+// Free a cluster chain starting from a given cluster
+int fat32_free_cluster_chain(uint32_t start_cluster) {
+    if (!fat32_initialized) {
+        return -1;
+    }
+    
+    uint32_t current_cluster = start_cluster;
+    
+    while (current_cluster >= 2 && current_cluster < 0x0FFFFFF8) {
+        uint32_t next_cluster = fat32_get_next_cluster(current_cluster);
+        
+        // Mark current cluster as free
+        if (fat32_set_next_cluster(current_cluster, 0) != 0) {
+            return -1;
+        }
+        
+        current_cluster = next_cluster;
+    }
+    
+    return 0;
+}
+
+// Update directory entry file size
+int fat32_update_dir_entry_size(const char* filename, uint32_t new_size) {
+    if (!fat32_initialized) {
+        return -1;
+    }
+    
+    char fat32_name[11];
+    fat32_parse_filename(filename, fat32_name);
+    
+    // Read root directory
+    uint32_t lba = fat32_cluster_to_lba(current_directory_cluster);
+    uint8_t sector_buffer[512];
+    
+    for (uint32_t sector = 0; sector < boot_sector.sectors_per_cluster; sector++) {
+        if (ata_read_sectors(lba + sector, 1, (uint16_t*)sector_buffer) != 0) {
+            return -1;
+        }
+        
+        fat32_dir_entry_t* entries = (fat32_dir_entry_t*)sector_buffer;
+        
+        for (int i = 0; i < 512 / sizeof(fat32_dir_entry_t); i++) {
+            // Check if entry is deleted or end of directory
+            if (entries[i].name[0] == 0x00) break;
+            if (entries[i].name[0] == 0xE5) continue; // Already deleted
+            
+            // Skip volume labels and directories
+            if (entries[i].attributes & FAT_ATTR_VOLUME_ID) continue;
+            if (entries[i].attributes & FAT_ATTR_DIRECTORY) continue;
+            
+            // Compare filenames
+            if (fat32_compare_names((char*)entries[i].name, fat32_name)) {
+                // Update file size
+                entries[i].file_size = new_size;
+                
+                // Update modification time/date
+                entries[i].modify_time = fat32_get_current_time();
+                entries[i].modify_date = fat32_get_current_date();
+                
+                // Write back the modified directory entry
+                if (ata_write_sectors(lba + sector, 1, (uint16_t*)sector_buffer) != 0) {
+                    return -1;
+                }
+                
+                return 0;
+            }
+        }
+    }
+    
+    return -1; // File not found
+}
+
+// Update an existing file or create a new one with dynamic sizing
+int fat32_update_file(const char* filename, const uint8_t* data, uint32_t new_size) {
+    if (!fat32_initialized) {
+        tty_putstr("Error: FAT32 not initialized\n");
+        return -1;
+    }
+    
+    // Try to find existing file
+    fat32_file_t existing_file;
+    int file_exists = (fat32_open_file(filename, &existing_file) == 0);
+    
+    if (file_exists) {
+        // File exists - update it
+        uint32_t old_size = existing_file.file_size;
+        uint32_t old_clusters = (old_size + boot_sector.sectors_per_cluster * 512 - 1) / (boot_sector.sectors_per_cluster * 512);
+        uint32_t new_clusters = (new_size + boot_sector.sectors_per_cluster * 512 - 1) / (boot_sector.sectors_per_cluster * 512);
+        
+        uint32_t first_cluster = existing_file.first_cluster;
+        
+        if (new_clusters > old_clusters) {
+            // Need to allocate more clusters
+            uint32_t additional_clusters = new_clusters - old_clusters;
+            
+            // Find the last cluster in the existing chain
+            uint32_t last_cluster = first_cluster;
+            if (old_clusters > 1) {
+                uint32_t current = first_cluster;
+                while (current >= 2 && current < 0x0FFFFFF8) {
+                    uint32_t next = fat32_get_next_cluster(current);
+                    if (next >= 0x0FFFFFF8) break; // End of chain
+                    last_cluster = next;
+                    current = next;
+                }
+            }
+            
+            // Extend the cluster chain
+            if (fat32_extend_cluster_chain(last_cluster, additional_clusters) != 0) {
+                tty_putstr("Error: Could not extend file\n");
+                return -1;
+            }
+        } else if (new_clusters < old_clusters) {
+            // Need to free some clusters
+            uint32_t clusters_to_keep = new_clusters;
+            uint32_t current = first_cluster;
+            
+            // Navigate to the cluster that should be the new end
+            for (uint32_t i = 1; i < clusters_to_keep && current >= 2 && current < 0x0FFFFFF8; i++) {
+                current = fat32_get_next_cluster(current);
+            }
+            
+            if (current >= 2 && current < 0x0FFFFFF8) {
+                uint32_t next_cluster = fat32_get_next_cluster(current);
+                
+                // Mark this cluster as end of chain
+                fat32_set_next_cluster(current, FAT32_EOC);
+                
+                // Free the remaining clusters
+                if (next_cluster >= 2 && next_cluster < 0x0FFFFFF8) {
+                    fat32_free_cluster_chain(next_cluster);
+                }
+            }
+        }
+        
+        // Write the new data
+        uint32_t bytes_written = 0;
+        uint32_t current_cluster = first_cluster;
+        uint32_t cluster_size = boot_sector.sectors_per_cluster * 512;
+        
+        while (bytes_written < new_size && current_cluster >= 2 && current_cluster < 0x0FFFFFF8) {
+            uint32_t lba = fat32_cluster_to_lba(current_cluster);
+            uint8_t write_buffer[cluster_size];
+            
+            // Clear buffer
+            for (uint32_t i = 0; i < cluster_size; i++) {
+                write_buffer[i] = 0;
+            }
+            
+            // Copy data to buffer
+            uint32_t bytes_to_copy = new_size - bytes_written;
+            if (bytes_to_copy > cluster_size) {
+                bytes_to_copy = cluster_size;
+            }
+            
+            if (bytes_to_copy > 0) {
+                for (uint32_t i = 0; i < bytes_to_copy; i++) {
+                    write_buffer[i] = data[bytes_written + i];
+                }
+            }
+            
+            // Write cluster
+            for (uint32_t i = 0; i < boot_sector.sectors_per_cluster; i++) {
+                if (ata_write_sectors(lba + i, 1, (uint16_t*)(write_buffer + i * 512)) != 0) {
+                    return -1;
+                }
+            }
+            
+            bytes_written += bytes_to_copy;
+            current_cluster = fat32_get_next_cluster(current_cluster);
+        }
+        
+        // Update directory entry size
+        if (fat32_update_dir_entry_size(filename, new_size) != 0) {
+            tty_putstr("Error: Could not update directory entry\n");
+            return -1;
+        }
+        
+        return 0;
+    } else {
+        // File doesn't exist - create new file
+        return fat32_create_file(filename, data, new_size);
+    }
 }

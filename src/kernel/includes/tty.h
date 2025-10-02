@@ -19,5 +19,12 @@
 	void tty_backspace(void);
 	void tty_process_command(void);
 	void tty_putchar_internal(char c);
+	
+	// Text editor functions
+	void tty_start_editor_mode(const char* filename);
+	void tty_exit_editor_mode(void);
+	int tty_is_editor_mode(void);
+	void tty_editor_add_char(char c);
+	void tty_editor_backspace(void);
 
 #endif //PRINT_H
