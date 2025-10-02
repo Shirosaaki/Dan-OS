@@ -34,7 +34,7 @@ void tty_process_command(void) {
             tty_putstr("  mv       - Move files/dirs (mv source dest, use . for current)\n");
             tty_putstr("  rn       - Rename file (rn oldname newname)\n");
             tty_putstr("  md       - Create directory (md dirname)\n");
-            tty_putstr("  cd       - Change directory (cd dirname or cd ..)\n");
+            tty_putstr("  cd       - Change directory (cd path, supports ../.. and folder/subfolder)\n");
             tty_putstr("  rmdir    - Remove directory and all contents (rmdir dirname)\n");
             tty_putstr("  disk     - Show disk information\n");
         } else if (strncmp(cmd_buffer, "cls", 3) == 0) {
@@ -236,23 +236,42 @@ void tty_process_command(void) {
                 fat32_create_directory(dirname);
             }
         } else if (strncmp(cmd_buffer, "cd ", 3) == 0) {
-            // Change directory: cd dirname
-            char dirname[32];
+            // Change directory: cd path (supports complex paths like folder/subfolder, ../.., etc.)
+            char path[256];
             int j = 0;
-            for (int i = 3; i < strlength(cmd_buffer) && j < 31; i++, j++) {
-                dirname[j] = cmd_buffer[i];
+            for (int i = 3; i < strlength(cmd_buffer) && j < 255; i++, j++) {
+                path[j] = cmd_buffer[i];
             }
-            dirname[j] = '\0';
+            path[j] = '\0';
             
-            if (dirname[0] == '\0') {
-                tty_putstr("Usage: cd dirname\n");
-                tty_putstr("Example: cd Documents\n");
-                tty_putstr("Example: cd .. (parent directory)\n");
+            if (path[0] == '\0') {
+                tty_putstr("Usage: cd path\n");
+                tty_putstr("Examples:\n");
+                tty_putstr("  cd Documents        - Go to Documents directory\n");
+                tty_putstr("  cd ..              - Go to parent directory\n");
+                tty_putstr("  cd ../../..        - Go up three levels\n");
+                tty_putstr("  cd folder/subfolder - Navigate through path\n");
+                tty_putstr("  cd /               - Go to root directory\n");
             } else {
-                if (fat32_change_directory(dirname) == 0) {
-                    tty_putstr("Changed to directory: ");
-                    tty_putstr(dirname);
-                    tty_putstr("\n");
+                // Check if it's a simple single directory (no slashes)
+                int has_slash = 0;
+                for (int k = 0; path[k] != '\0'; k++) {
+                    if (path[k] == '/') {
+                        has_slash = 1;
+                        break;
+                    }
+                }
+                
+                if (has_slash || (path[0] == '.' && path[1] == '.' && (path[2] == '/' || path[2] == '\0'))) {
+                    // Complex path - use path navigation
+                    if (fat32_change_directory_path(path) != 0) {
+                        tty_putstr("Error changing directory\n");
+                    }
+                } else {
+                    // Simple single directory - use basic function
+                    if (fat32_change_directory(path) != 0)
+                        tty_putstr("Error changing directory\n");
+                    
                 }
             }
         } else if (strncmp(cmd_buffer, "cd", 2) == 0 && strlength(cmd_buffer) == 2) {

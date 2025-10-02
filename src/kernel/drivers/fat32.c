@@ -1115,8 +1115,6 @@ int fat32_change_directory(const char* dirname) {
                     }
                 }
             }
-            
-            tty_putstr("Changed to parent directory\n");
             return 0;
         } else {
             tty_putstr("Error: Cannot find .. entry in current directory\n");
@@ -1163,6 +1161,70 @@ int fat32_change_directory(const char* dirname) {
         j++;
     }
     current_full_path[path_len + j] = '\0';
+    
+    return 0;
+}
+
+// Change directory using complex paths (e.g., "folder/subfolder", "../../..", "../folder")
+int fat32_change_directory_path(const char* path) {
+    if (!fat32_initialized) {
+        tty_putstr("Error: FAT32 not initialized\n");
+        return -1;
+    }
+    
+    // Handle empty path
+    if (path[0] == '\0') {
+        return 0;
+    }
+    
+    // Handle absolute paths (starting with /)
+    if (path[0] == '/') {
+        // Go to root first
+        current_directory_cluster = boot_sector.root_cluster;
+        current_full_path[0] = '/';
+        current_full_path[1] = '\0';
+        
+        // If path is just "/", we're done
+        if (path[1] == '\0') {
+            return 0;
+        }
+        
+        // Continue with rest of path (skip the leading /)
+        path++;
+    }
+    
+    // Parse path components separated by '/'
+    char component[64];
+    int path_pos = 0;
+    int comp_pos = 0;
+    
+    while (1) {
+        // Extract next path component
+        comp_pos = 0;
+        
+        // Skip any leading slashes
+        while (path[path_pos] == '/') path_pos++;
+        
+        // If we've reached the end, we're done
+        if (path[path_pos] == '\0') break;
+        
+        // Extract component until next '/' or end of string
+        while (path[path_pos] != '\0' && path[path_pos] != '/' && comp_pos < 63) {
+            component[comp_pos++] = path[path_pos++];
+        }
+        component[comp_pos] = '\0';
+        
+        // Skip empty components
+        if (component[0] == '\0') continue;
+        
+        // Change to this directory component
+        if (fat32_change_directory(component) != 0) {
+            tty_putstr("Error: Cannot navigate to: ");
+            tty_putstr(component);
+            tty_putstr("\n");
+            return -1;
+        }
+    }
     
     return 0;
 }

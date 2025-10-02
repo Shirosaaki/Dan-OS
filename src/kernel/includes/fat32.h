@@ -103,6 +103,7 @@ int fat32_update_dir_entry_size(const char* filename, uint32_t new_size);
 // Directory operations  
 int fat32_create_directory(const char* dirname);
 int fat32_change_directory(const char* dirname);
+int fat32_change_directory_path(const char* path);
 int fat32_remove_directory(const char* dirname);
 int fat32_remove_directory_recursive(const char* dirname);
 int fat32_list_directory_by_name(const char* dirname);
