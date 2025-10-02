@@ -1473,3 +1473,550 @@ void fat32_get_current_path(char* path, int max_len) {
     }
     path[i] = '\0';
 }
+
+// Copy a file from source to destination
+int fat32_copy_file(const char* source, const char* dest) {
+    if (!fat32_initialized) {
+        tty_putstr("Error: FAT32 not initialized\n");
+        return -1;
+    }
+    
+    // Parse source path
+    uint32_t source_dir_cluster;
+    char source_filename[32];
+    if (fat32_parse_path(source, &source_dir_cluster, source_filename) != 0) {
+        tty_putstr("Error: Invalid source path: ");
+        tty_putstr(source);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Check if source file exists
+    fat32_dir_entry_t source_entry;
+    if (fat32_find_file(source_filename, source_dir_cluster, &source_entry) != 0) {
+        tty_putstr("Error: Source file not found: ");
+        tty_putstr(source);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Check if source is a directory
+    if (source_entry.attributes & FAT_ATTR_DIRECTORY) {
+        tty_putstr("Error: Cannot copy directories: ");
+        tty_putstr(source);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Parse destination
+    uint32_t target_dir_cluster;
+    char target_filename[32];
+    
+    // Handle special case: "." means current directory with original filename
+    if (dest[0] == '.' && dest[1] == '\0') {
+        target_dir_cluster = current_directory_cluster;
+        int i = 0;
+        while (source_filename[i] && i < 31) {
+            target_filename[i] = source_filename[i];
+            i++;
+        }
+        target_filename[i] = '\0';
+    } else {
+        // Check if destination is a directory or filename
+        fat32_dir_entry_t dest_entry;
+        if (fat32_find_file(dest, current_directory_cluster, &dest_entry) == 0 && 
+            (dest_entry.attributes & FAT_ATTR_DIRECTORY)) {
+            // Destination is an existing directory - copy into it with original filename
+            target_dir_cluster = ((uint32_t)dest_entry.first_cluster_high << 16) | dest_entry.first_cluster_low;
+            int i = 0;
+            while (source_filename[i] && i < 31) {
+                target_filename[i] = source_filename[i];
+                i++;
+            }
+            target_filename[i] = '\0';
+        } else {
+            // Parse as path (could be new filename or path to directory)
+            if (fat32_parse_path(dest, &target_dir_cluster, target_filename) != 0) {
+                tty_putstr("Error: Invalid destination path: ");
+                tty_putstr(dest);
+                tty_putstr("\n");
+                return -1;
+            }
+        }
+    }
+    
+    // Read the source file data
+    uint32_t file_size = source_entry.file_size;
+    if (file_size > 32768) { // Limit to 32KB for safety
+        tty_putstr("Error: File too large to copy (>32KB)\n");
+        return -1;
+    }
+    
+    // Allocate buffer for file data
+    static uint8_t copy_buffer[32768];
+    
+    // Open and read source file
+    fat32_file_t source_file;
+    source_file.first_cluster = ((uint32_t)source_entry.first_cluster_high << 16) | source_entry.first_cluster_low;
+    source_file.file_size = file_size;
+    source_file.current_cluster = source_file.first_cluster;
+    source_file.current_pos = 0;
+    
+    int bytes_read = fat32_read_file(&source_file, copy_buffer, file_size);
+    if (bytes_read < 0) {
+        tty_putstr("Error: Could not read source file\n");
+        return -1;
+    }
+    
+    // Save current directory and switch to target directory
+    uint32_t saved_dir = current_directory_cluster;
+    current_directory_cluster = target_dir_cluster;
+    
+    // Create file in target directory
+    int result = fat32_create_file(target_filename, copy_buffer, bytes_read);
+    
+    // Restore current directory
+    current_directory_cluster = saved_dir;
+    
+    if (result != 0) {
+        tty_putstr("Error: Could not create destination file\n");
+        return -1;
+    }
+    
+    tty_putstr("File copied: ");
+    tty_putstr(source);
+    tty_putstr(" -> ");
+    tty_putstr(dest);
+    tty_putstr("\n");
+    return 0;
+}
+
+// Move a file to a different directory
+int fat32_move_file(const char* source, const char* dest_dir) {
+    if (!fat32_initialized) {
+        tty_putstr("Error: FAT32 not initialized\n");
+        return -1;
+    }
+    
+    // Parse source path
+    uint32_t source_dir_cluster;
+    char source_filename[32];
+    if (fat32_parse_path(source, &source_dir_cluster, source_filename) != 0) {
+        tty_putstr("Error: Invalid source path: ");
+        tty_putstr(source);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Find source file
+    fat32_dir_entry_t source_entry;
+    if (fat32_find_file(source_filename, source_dir_cluster, &source_entry) != 0) {
+        tty_putstr("Error: Source file not found: ");
+        tty_putstr(source);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Check if source is a file (not directory)
+    if (source_entry.attributes & FAT_ATTR_DIRECTORY) {
+        tty_putstr("Error: Cannot move directories\n");
+        return -1;
+    }
+    
+    // Handle destination
+    uint32_t dest_cluster;
+    
+    if (dest_dir[0] == '.' && dest_dir[1] == '\0') {
+        // Move to current directory
+        dest_cluster = current_directory_cluster;
+    } else {
+        // Check if destination directory exists
+        fat32_dir_entry_t dest_entry;
+        if (fat32_find_file(dest_dir, current_directory_cluster, &dest_entry) != 0) {
+            tty_putstr("Error: Destination directory not found: ");
+            tty_putstr(dest_dir);
+            tty_putstr("\n");
+            return -1;
+        }
+        
+        // Check if destination is actually a directory
+        if (!(dest_entry.attributes & FAT_ATTR_DIRECTORY)) {
+            tty_putstr("Error: Destination is not a directory: ");
+            tty_putstr(dest_dir);
+            tty_putstr("\n");
+            return -1;
+        }
+        
+        dest_cluster = ((uint32_t)dest_entry.first_cluster_high << 16) | dest_entry.first_cluster_low;
+    }
+    
+    // Read source file data
+    uint32_t file_size = source_entry.file_size;
+    if (file_size > 32768) {
+        tty_putstr("Error: File too large to move (>32KB)\n");
+        return -1;
+    }
+    
+    static uint8_t move_buffer[32768];
+    
+    // Read source file
+    fat32_file_t source_file;
+    source_file.first_cluster = ((uint32_t)source_entry.first_cluster_high << 16) | source_entry.first_cluster_low;
+    source_file.file_size = file_size;
+    source_file.current_cluster = source_file.first_cluster;
+    source_file.current_pos = 0;
+    
+    int bytes_read = fat32_read_file(&source_file, move_buffer, file_size);
+    if (bytes_read < 0) {
+        tty_putstr("Error: Could not read source file\n");
+        return -1;
+    }
+    
+    // Save current directory and switch to destination directory
+    uint32_t saved_dir = current_directory_cluster;
+    current_directory_cluster = dest_cluster;
+    
+    // Create file in destination directory with same filename
+    int result = fat32_create_file(source_filename, move_buffer, bytes_read);
+    
+    // Restore current directory
+    current_directory_cluster = saved_dir;
+    
+    if (result != 0) {
+        tty_putstr("Error: Could not create file in destination directory\n");
+        return -1;
+    }
+    
+    // Switch back to source directory to delete file
+    current_directory_cluster = source_dir_cluster;
+    
+    // Delete source file
+    if (fat32_delete_file(source_filename) != 0) {
+        tty_putstr("Warning: File copied but could not delete source\n");
+        // Restore original directory
+        current_directory_cluster = saved_dir;
+        return -1;
+    }
+    
+    // Restore original directory
+    current_directory_cluster = saved_dir;
+    
+    tty_putstr("File moved: ");
+    tty_putstr(source);
+    tty_putstr(" -> ");
+    tty_putstr(dest_dir);
+    tty_putstr("/");
+    tty_putstr(source_filename);
+    tty_putstr("\n");
+    return 0;
+}
+
+// Rename a file in the same directory
+int fat32_rename_file(const char* old_name, const char* new_name) {
+    if (!fat32_initialized) {
+        tty_putstr("Error: FAT32 not initialized\n");
+        return -1;
+    }
+    
+    // Check if source file exists
+    fat32_dir_entry_t entry;
+    if (fat32_find_file(old_name, current_directory_cluster, &entry) != 0) {
+        tty_putstr("Error: File not found: ");
+        tty_putstr(old_name);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Check if destination name already exists
+    fat32_dir_entry_t dest_entry;
+    if (fat32_find_file(new_name, current_directory_cluster, &dest_entry) == 0) {
+        tty_putstr("Error: File already exists: ");
+        tty_putstr(new_name);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Find and update the directory entry
+    uint32_t lba = fat32_cluster_to_lba(current_directory_cluster);
+    uint8_t sector_buffer[512];
+    char fat32_old_name[11];
+    fat32_parse_filename(old_name, fat32_old_name);
+    
+    for (uint32_t sector = 0; sector < boot_sector.sectors_per_cluster; sector++) {
+        if (ata_read_sectors(lba + sector, 1, (uint16_t*)sector_buffer) != 0) {
+            return -1;
+        }
+        
+        fat32_dir_entry_t* entries = (fat32_dir_entry_t*)sector_buffer;
+        
+        for (int i = 0; i < 512 / sizeof(fat32_dir_entry_t); i++) {
+            if (entries[i].name[0] == 0x00) break;
+            if (entries[i].name[0] == 0xE5) continue;
+            
+            if (fat32_compare_names((char*)entries[i].name, fat32_old_name)) {
+                // Found the entry - update the name
+                fat32_parse_filename(new_name, (char*)entries[i].name);
+                
+                // Write back
+                if (ata_write_sectors(lba + sector, 1, (uint16_t*)sector_buffer) != 0) {
+                    tty_putstr("Error: Could not update directory entry\n");
+                    return -1;
+                }
+                
+                tty_putstr("File renamed: ");
+                tty_putstr(old_name);
+                tty_putstr(" -> ");
+                tty_putstr(new_name);
+                tty_putstr("\n");
+                return 0;
+            }
+        }
+    }
+    
+    tty_putstr("Error: Could not find directory entry to rename\n");
+    return -1;
+}
+
+// Parse a path like "folder/file" and return the directory cluster and filename
+int fat32_parse_path(const char* path, uint32_t* dir_cluster, char* filename) {
+    // Start from current directory
+    *dir_cluster = current_directory_cluster;
+    
+    // Handle absolute paths (starting with /)
+    if (path[0] == '/') {
+        *dir_cluster = boot_sector.root_cluster;
+        path++; // Skip the leading /
+    }
+    
+    // Handle simple filename (no path separators)
+    int has_slash = 0;
+    for (int i = 0; path[i]; i++) {
+        if (path[i] == '/') {
+            has_slash = 1;
+            break;
+        }
+    }
+    
+    if (!has_slash) {
+        // Simple filename - copy and return current directory
+        int i = 0;
+        while (path[i] && i < 31) {
+            filename[i] = path[i];
+            i++;
+        }
+        filename[i] = '\0';
+        return 0;
+    }
+    
+    // Parse path with directories
+    char current_dir[32];
+    int path_pos = 0;
+    int dir_pos = 0;
+    
+    while (path[path_pos]) {
+        if (path[path_pos] == '/') {
+            // End of directory name
+            current_dir[dir_pos] = '\0';
+            
+            if (dir_pos > 0) {
+                // Navigate to this directory
+                fat32_dir_entry_t entry;
+                if (fat32_find_file(current_dir, *dir_cluster, &entry) != 0) {
+                    return -1; // Directory not found
+                }
+                
+                if (!(entry.attributes & FAT_ATTR_DIRECTORY)) {
+                    return -1; // Not a directory
+                }
+                
+                *dir_cluster = ((uint32_t)entry.first_cluster_high << 16) | entry.first_cluster_low;
+            }
+            
+            dir_pos = 0;
+            path_pos++;
+        } else {
+            // Add character to current directory name
+            if (dir_pos < 31) {
+                current_dir[dir_pos++] = path[path_pos];
+            }
+            path_pos++;
+        }
+    }
+    
+    // The remaining part is the filename
+    current_dir[dir_pos] = '\0';
+    int i = 0;
+    while (current_dir[i] && i < 31) {
+        filename[i] = current_dir[i];
+        i++;
+    }
+    filename[i] = '\0';
+    
+    return 0;
+}
+
+// Move a directory to another location
+int fat32_move_directory(const char* source, const char* dest) {
+    if (!fat32_initialized) {
+        tty_putstr("Error: FAT32 not initialized\n");
+        return -1;
+    }
+    
+    // Parse source path
+    uint32_t source_parent_cluster;
+    char source_dirname[32];
+    if (fat32_parse_path(source, &source_parent_cluster, source_dirname) != 0) {
+        tty_putstr("Error: Invalid source path\n");
+        return -1;
+    }
+    
+    // Find source directory
+    fat32_dir_entry_t source_entry;
+    if (fat32_find_file(source_dirname, source_parent_cluster, &source_entry) != 0) {
+        tty_putstr("Error: Source directory not found: ");
+        tty_putstr(source);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Verify it's actually a directory
+    if (!(source_entry.attributes & FAT_ATTR_DIRECTORY)) {
+        tty_putstr("Error: Source is not a directory: ");
+        tty_putstr(source);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Parse destination path
+    uint32_t dest_parent_cluster;
+    char dest_name[32];
+    
+    // Check if destination ends with / or is a directory
+    int dest_len = 0;
+    while (dest[dest_len]) dest_len++;
+    
+    if (dest_len > 0 && dest[dest_len - 1] == '/') {
+        // Destination is a directory - use original directory name
+        if (fat32_parse_path(dest, &dest_parent_cluster, dest_name) != 0) {
+            tty_putstr("Error: Invalid destination path\n");
+            return -1;
+        }
+        // Use source directory name
+        int i = 0;
+        while (source_dirname[i] && i < 31) {
+            dest_name[i] = source_dirname[i];
+            i++;
+        }
+        dest_name[i] = '\0';
+    } else {
+        // Check if destination is existing directory
+        uint32_t temp_cluster;
+        char temp_name[32];
+        if (fat32_parse_path(dest, &temp_cluster, temp_name) == 0) {
+            fat32_dir_entry_t temp_entry;
+            if (fat32_find_file(temp_name, temp_cluster, &temp_entry) == 0 && 
+                (temp_entry.attributes & FAT_ATTR_DIRECTORY)) {
+                // Destination is existing directory
+                dest_parent_cluster = ((uint32_t)temp_entry.first_cluster_high << 16) | temp_entry.first_cluster_low;
+                int i = 0;
+                while (source_dirname[i] && i < 31) {
+                    dest_name[i] = source_dirname[i];
+                    i++;
+                }
+                dest_name[i] = '\0';
+            } else {
+                // Destination is new name
+                dest_parent_cluster = temp_cluster;
+                int i = 0;
+                while (temp_name[i] && i < 31) {
+                    dest_name[i] = temp_name[i];
+                    i++;
+                }
+                dest_name[i] = '\0';
+            }
+        } else {
+            tty_putstr("Error: Invalid destination path\n");
+            return -1;
+        }
+    }
+    
+    // Check if destination already exists
+    fat32_dir_entry_t dest_check;
+    if (fat32_find_file(dest_name, dest_parent_cluster, &dest_check) == 0) {
+        tty_putstr("Error: Destination already exists: ");
+        tty_putstr(dest_name);
+        tty_putstr("\n");
+        return -1;
+    }
+    
+    // Remove from source parent directory
+    uint32_t source_lba = fat32_cluster_to_lba(source_parent_cluster);
+    uint8_t sector_buffer[512];
+    char fat32_source_name[11];
+    fat32_parse_filename(source_dirname, fat32_source_name);
+    
+    // Find and remove source entry
+    for (uint32_t sector = 0; sector < boot_sector.sectors_per_cluster; sector++) {
+        if (ata_read_sectors(source_lba + sector, 1, (uint16_t*)sector_buffer) != 0) {
+            return -1;
+        }
+        
+        fat32_dir_entry_t* entries = (fat32_dir_entry_t*)sector_buffer;
+        
+        for (int i = 0; i < 512 / sizeof(fat32_dir_entry_t); i++) {
+            if (entries[i].name[0] == 0x00) break;
+            if (entries[i].name[0] == 0xE5) continue;
+            
+            if (fat32_compare_names((char*)entries[i].name, fat32_source_name)) {
+                // Mark as deleted
+                entries[i].name[0] = 0xE5;
+                
+                // Write back
+                if (ata_write_sectors(source_lba + sector, 1, (uint16_t*)sector_buffer) != 0) {
+                    return -1;
+                }
+                goto source_removed;
+            }
+        }
+    }
+    
+    tty_putstr("Error: Could not remove source directory entry\n");
+    return -1;
+    
+source_removed:
+    // Add to destination parent directory
+    fat32_dir_entry_t new_entry = source_entry;
+    fat32_parse_filename(dest_name, (char*)new_entry.name);
+    
+    if (fat32_add_dir_entry(dest_parent_cluster, &new_entry) != 0) {
+        tty_putstr("Error: Could not add to destination directory\n");
+        return -1;
+    }
+    
+    // Update the ".." entry in the moved directory to point to new parent
+    uint32_t dir_cluster = ((uint32_t)source_entry.first_cluster_high << 16) | source_entry.first_cluster_low;
+    uint32_t dir_lba = fat32_cluster_to_lba(dir_cluster);
+    
+    if (ata_read_sectors(dir_lba, 1, (uint16_t*)sector_buffer) != 0) {
+        tty_putstr("Warning: Could not update parent reference\n");
+    } else {
+        fat32_dir_entry_t* dir_entries = (fat32_dir_entry_t*)sector_buffer;
+        
+        // Find ".." entry (should be second entry)
+        if (dir_entries[1].name[0] == '.' && dir_entries[1].name[1] == '.') {
+            dir_entries[1].first_cluster_high = (dest_parent_cluster >> 16) & 0xFFFF;
+            dir_entries[1].first_cluster_low = dest_parent_cluster & 0xFFFF;
+            
+            if (ata_write_sectors(dir_lba, 1, (uint16_t*)sector_buffer) != 0) {
+                tty_putstr("Warning: Could not update parent reference\n");
+            }
+        }
+    }
+    
+    tty_putstr("Directory moved: ");
+    tty_putstr(source);
+    tty_putstr(" -> ");
+    tty_putstr(dest);
+    tty_putstr("\n");
+    return 0;
+}

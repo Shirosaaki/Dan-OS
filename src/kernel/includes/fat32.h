@@ -109,9 +109,17 @@ int fat32_list_directory_by_name(const char* dirname);
 uint32_t fat32_get_current_directory(void);
 void fat32_get_current_path(char* path, int max_len);
 
+// File operations
+int fat32_copy_file(const char* source, const char* dest);
+int fat32_move_file(const char* source, const char* dest);
+int fat32_move_directory(const char* source, const char* dest);
+int fat32_rename_file(const char* oldname, const char* newname);
+int fat32_resolve_path(const char* path, uint32_t* result_cluster, char* result_filename);
+
 // Helper functions
 void fat32_parse_filename(const char* input, char* output);
 int fat32_compare_names(const char* name1, const char* name2);
+int fat32_parse_path(const char* path, uint32_t* dir_cluster, char* filename);
 uint16_t fat32_get_current_date(void);
 uint16_t fat32_get_current_time(void);
 

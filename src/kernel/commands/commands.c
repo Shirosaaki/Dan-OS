@@ -30,6 +30,9 @@ void tty_process_command(void) {
             tty_putstr("  ct       - Create file (ct filename content)\n");
             tty_putstr("  rm       - Delete file (rm filename or rm *)\n");
             tty_putstr("  wr       - Text editor (wr filename, Ctrl to save)\n");
+            tty_putstr("  cp       - Copy file (cp source dest, use . for current dir)\n");
+            tty_putstr("  mv       - Move files/dirs (mv source dest, use . for current)\n");
+            tty_putstr("  rn       - Rename file (rn oldname newname)\n");
             tty_putstr("  md       - Create directory (md dirname)\n");
             tty_putstr("  cd       - Change directory (cd dirname or cd ..)\n");
             tty_putstr("  rmdir    - Remove directory and all contents (rmdir dirname)\n");
@@ -277,6 +280,120 @@ void tty_process_command(void) {
                 tty_putstr(dirname);
                 tty_putstr("\n");
                 fat32_remove_directory_recursive(dirname);
+            }
+        } else if (strncmp(cmd_buffer, "cp ", 3) == 0) {
+            // Copy file: cp source dest
+            char source[32], dest[32];
+            int i = 3, j = 0;
+            
+            // Skip spaces
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] == ' ') i++;
+            
+            // Get source filename
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] != ' ' && j < 31) {
+                source[j++] = cmd_buffer[i++];
+            }
+            source[j] = '\0';
+            
+            // Skip spaces
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] == ' ') i++;
+            
+            // Get destination filename
+            j = 0;
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] != ' ' && j < 31) {
+                dest[j++] = cmd_buffer[i++];
+            }
+            dest[j] = '\0';
+            
+            if (source[0] == '\0' || dest[0] == '\0') {
+                tty_putstr("Usage: cp source destination\n");
+                tty_putstr("Example: cp file1.txt file2.txt\n");
+            } else {
+                fat32_copy_file(source, dest);
+            }
+        } else if (strncmp(cmd_buffer, "mv ", 3) == 0) {
+            // Move file to directory: mv file destdir
+            char source[32], dest_dir[32];
+            int i = 3, j = 0;
+            
+            // Skip spaces
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] == ' ') i++;
+            
+            // Get source filename
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] != ' ' && j < 31) {
+                source[j++] = cmd_buffer[i++];
+            }
+            source[j] = '\0';
+            
+            // Skip spaces
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] == ' ') i++;
+            
+            // Get destination directory
+            j = 0;
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] != ' ' && j < 31) {
+                dest_dir[j++] = cmd_buffer[i++];
+            }
+            dest_dir[j] = '\0';
+            
+            if (source[0] == '\0' || dest_dir[0] == '\0') {
+                tty_putstr("Usage: mv source dest\n");
+                tty_putstr("Example: mv file.txt Documents\n");
+                tty_putstr("Example: mv folder/ backup/\n");
+                tty_putstr("Example: mv file.txt ..\n");
+            } else {
+                // Auto-detect if source is file or directory
+                uint32_t source_cluster;
+                char source_name[32];
+                if (fat32_parse_path(source, &source_cluster, source_name) == 0) {
+                    fat32_dir_entry_t entry;
+                    if (fat32_find_file(source_name, source_cluster, &entry) == 0) {
+                        if (entry.attributes & FAT_ATTR_DIRECTORY) {
+                            // It's a directory - use directory move
+                            fat32_move_directory(source, dest_dir);
+                        } else {
+                            // It's a file - use file move
+                            fat32_move_file(source, dest_dir);
+                        }
+                    } else {
+                        tty_putstr("Error: Source not found: ");
+                        tty_putstr(source);
+                        tty_putstr("\n");
+                    }
+                } else {
+                    tty_putstr("Error: Invalid source path: ");
+                    tty_putstr(source);
+                    tty_putstr("\n");
+                }
+            }
+        } else if (strncmp(cmd_buffer, "rn ", 3) == 0) {
+            // Rename file: rn oldname newname
+            char old_name[32], new_name[32];
+            int i = 3, j = 0;
+            
+            // Skip spaces
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] == ' ') i++;
+            
+            // Get old filename
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] != ' ' && j < 31) {
+                old_name[j++] = cmd_buffer[i++];
+            }
+            old_name[j] = '\0';
+            
+            // Skip spaces
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] == ' ') i++;
+            
+            // Get new filename
+            j = 0;
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] != ' ' && j < 31) {
+                new_name[j++] = cmd_buffer[i++];
+            }
+            new_name[j] = '\0';
+            
+            if (old_name[0] == '\0' || new_name[0] == '\0') {
+                tty_putstr("Usage: rn oldname newname\n");
+                tty_putstr("Example: rn oldfile.txt newfile.txt\n");
+            } else {
+                fat32_rename_file(old_name, new_name);
             }
         } else {
             tty_putstr("Unknown command: ");
