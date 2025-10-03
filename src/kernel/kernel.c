@@ -8,6 +8,7 @@
 #include "ata.h"
 #include "fat32.h"
 #include "rtc.h"
+#include "exec.h"
 
 void kernel_main(void) {
     // Initialize terminal
@@ -30,6 +31,8 @@ void kernel_main(void) {
         // Initialize timezone system (requires filesystem)
         timezone_init();
     }
+    // Initialize execution module
+    exec_init();
     tty_putstr("DanOS:/$ ");
     
     while (1) {

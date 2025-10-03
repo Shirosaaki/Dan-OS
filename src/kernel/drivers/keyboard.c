@@ -77,6 +77,7 @@ static int shift_pressed = 0;
 static int caps_lock = 0;
 static int ctrl_pressed = 0;
 static int num_lock = 1; // Numpad starts enabled
+static int extended_scancode = 0; // Flag for 0xE0 prefix
 
 // Keyboard buffer
 #define KEYBOARD_BUFFER_SIZE 256
@@ -113,9 +114,16 @@ void keyboard_handler(void) {
     uint8_t scancode = inb(KEYBOARD_DATA_PORT);
     char c = 0;
     
+    // Check for extended scancode prefix (0xE0)
+    if (scancode == 0xE0) {
+        extended_scancode = 1;
+        return;
+    }
+    
     // Check if key is released (scancode has bit 7 set)
     if (scancode & 0x80) {
         scancode &= 0x7F;
+        extended_scancode = 0; // Reset extended flag
         // Handle key releases
         if (scancode == 0x2A || scancode == 0x36) {
             shift_pressed = 0;
@@ -155,6 +163,33 @@ void keyboard_handler(void) {
         // Num lock toggle
         num_lock = !num_lock;
         return;
+    }
+    
+    // Handle arrow keys - only if extended scancode
+    if (extended_scancode) {
+        extended_scancode = 0; // Reset flag
+        if (scancode == 0x48) {
+            // Up arrow
+            tty_cursor_up();
+            return;
+        }
+        if (scancode == 0x50) {
+            // Down arrow
+            tty_cursor_down();
+            return;
+        }
+        if (scancode == 0x4B) {
+            // Left arrow
+            tty_cursor_left();
+            return;
+        }
+        if (scancode == 0x4D) {
+            // Right arrow
+            tty_cursor_right();
+            return;
+        }
+        // Handle other extended scancodes here if needed
+        return; // Ignore unhandled extended scancodes
     }
     
     // Handle some common extended scancodes directly
@@ -234,15 +269,17 @@ void keyboard_handler(void) {
             if (tty_is_editor_mode()) {
                 // In editor mode - handle differently
                 if (c == '\b') {
-                    tty_backspace();
                     tty_editor_backspace();
+                    // Need to redraw from cursor position
+                    tty_editor_redraw();
                 } else if (c == '\n') {
                     tty_putchar('\n');
                     tty_editor_add_char(c);
                 } else {
-                    // Regular character in editor
-                    tty_putchar(c);
+                    // Regular character in editor - insert at cursor
                     tty_editor_add_char(c);
+                    // Redraw from cursor position
+                    tty_editor_redraw();
                 }
             } else {
                 // Normal mode - handle commands
