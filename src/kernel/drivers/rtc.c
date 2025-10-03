@@ -1,5 +1,5 @@
 //
-// RTC (Real-Time Clock) driver for DanOS
+// Created by Shirosaaki on 02/10/2025.
 //
 
 #include "rtc.h"
