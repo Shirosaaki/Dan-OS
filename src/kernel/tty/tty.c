@@ -61,6 +61,9 @@ void tty_clear(void) {
             tty_buffer[index] = vga_entry(' ', tty_color);
         }
     }
+    tty_row = 0;
+    tty_column = 0;
+    set_cursor_offset(0);
 }
 
 void tty_setcolor(uint8_t color) {

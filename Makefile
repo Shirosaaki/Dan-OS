@@ -86,7 +86,7 @@ re: clean build
 
 .PHONY: run
 run:
-	@ qemu-system-x86_64 -cdrom $(ISO) -drive file=$(DISK_IMG),format=raw -boot d
+	@ qemu-system-x86_64 -cdrom $(ISO) -drive file=$(DISK_IMG),format=raw -boot d -serial stdio -display sdl -vga std -m 512
 
 .PHONY: run-no-disk
 run-no-disk:

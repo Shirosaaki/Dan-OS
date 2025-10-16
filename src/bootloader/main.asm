@@ -1,10 +1,13 @@
 global start
+global multiboot_ptr
 extern long_mode_start
 
 section .text
 bits 32
 start:
     mov esp, stack_top                      ; set the stack pointer
+    ; Save Multiboot2 info pointer (in EBX) so it survives across calls
+    mov [multiboot_ptr], ebx
     call check_multiboot                    ; check the Multiboot2 header
     call check_cpuid                        ; check if the CPU supports CPUID
     call check_long_mode                    ; check if the CPU supports long mode
@@ -110,6 +113,9 @@ stack_bottom:
     resb 4096 * 4                       ; 4 MiB stack
 stack_top:
 
+; Storage for multiboot info pointer (32-bit value)
+multiboot_ptr:
+    resd 1
 section .rodata
 gdt64:
     dq 0                                ; null descriptor
