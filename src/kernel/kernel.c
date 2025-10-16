@@ -8,7 +8,6 @@
 #include "ata.h"
 #include "fat32.h"
 #include "rtc.h"
-#include "exec.h"
 #include "framebuffer.h"
 #include "string.h"
 #include "mouse.h"
@@ -59,8 +58,6 @@ void kernel_main(void *multiboot_info) {
         // Initialize timezone system (requires filesystem)
         timezone_init();
     }
-    // Initialize execution module
-    exec_init();
     tty_putstr("Welcome to DanOS!\n");
     tty_putstr("=================\n\n");
     // Try to initialize framebuffer using multiboot info pointer passed in RDI

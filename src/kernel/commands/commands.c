@@ -6,8 +6,6 @@
 #include "fat32.h"
 #include "ata.h"
 #include "rtc.h"
-#include "compiler.h"
-#include "exec.h"
 
 extern void tty_putchar_internal(char c);
 extern size_t tty_row;
@@ -43,8 +41,6 @@ void tty_process_command(void) {
             tty_putstr("  time     - Display current time and date\n");
             tty_putstr("  timezone - Set timezone (timezone +/-H:M NAME or timezone list)\n");
             tty_putstr("  disk     - Show disk information\n");
-            tty_putstr("  compile  - Compile C source (compile source.c output.exe)\n");
-            tty_putstr("  exec     - Execute program (exec program.exe)\n");
         } else if (strncmp(cmd_buffer, "cls", 3) == 0) {
             tty_clear();
             tty_row = 0;
@@ -592,84 +588,6 @@ void tty_process_command(void) {
             tty_putchar('0' + minutes / 10);
             tty_putchar('0' + minutes % 10);
             tty_putstr(")\n");
-        } else if (strncmp(cmd_buffer, "compile ", 8) == 0) {
-            // Compile C source: compile source.c output.exe
-            char source_file[32];
-            char output_file[32];
-            int i = 8;
-            int j = 0;
-            
-            // Skip spaces
-            while (i < strlength(cmd_buffer) && cmd_buffer[i] == ' ') i++;
-            
-            // Get source filename
-            while (i < strlength(cmd_buffer) && cmd_buffer[i] != ' ' && j < 31) {
-                source_file[j++] = cmd_buffer[i++];
-            }
-            source_file[j] = '\0';
-            
-            // Skip spaces
-            while (i < strlength(cmd_buffer) && cmd_buffer[i] == ' ') i++;
-            
-            // Get output filename
-            j = 0;
-            while (i < strlength(cmd_buffer) && cmd_buffer[i] != ' ' && j < 31) {
-                output_file[j++] = cmd_buffer[i++];
-            }
-            output_file[j] = '\0';
-            
-            if (source_file[0] == '\0' || output_file[0] == '\0') {
-                tty_putstr("Usage: compile source.c output.exe\n");
-                tty_putstr("Example: compile hello.c hello.exe\n");
-            } else {
-                // Read source file
-                fat32_file_t file;
-                if (fat32_open_file(source_file, &file) == 0) {
-                    // Allocate buffer for source code
-                    uint8_t* source_buffer = (uint8_t*)0x800000; // 8MB
-                    uint32_t bytes_to_read = file.file_size > 4096 ? 4096 : file.file_size;
-                    int bytes_read = fat32_read_file(&file, source_buffer, bytes_to_read);
-                    
-                    if (bytes_read > 0) {
-                        // Compile the source
-                        if (compile_c_source((const char*)source_buffer, bytes_read, output_file) == 0) {
-                            tty_putstr("Successfully compiled ");
-                            tty_putstr(source_file);
-                            tty_putstr(" to ");
-                            tty_putstr(output_file);
-                            tty_putstr("\n");
-                        }
-                    } else {
-                        tty_putstr("Error: Could not read source file\n");
-                    }
-                } else {
-                    tty_putstr("Error: Source file not found: ");
-                    tty_putstr(source_file);
-                    tty_putstr("\n");
-                }
-            }
-        } else if (strncmp(cmd_buffer, "exec ", 5) == 0) {
-            // Execute program: exec program.exe
-            char filename[32];
-            int i = 5;
-            int j = 0;
-            
-            // Skip spaces
-            while (i < strlength(cmd_buffer) && cmd_buffer[i] == ' ') i++;
-            
-            // Get filename
-            while (i < strlength(cmd_buffer) && cmd_buffer[i] != ' ' && j < 31) {
-                filename[j++] = cmd_buffer[i++];
-            }
-            filename[j] = '\0';
-            
-            if (filename[0] == '\0') {
-                tty_putstr("Usage: exec program.exe\n");
-                tty_putstr("Example: exec hello.exe\n");
-            } else {
-                // Execute the program
-                exec_load_file(filename);
-            }
         } else {
             tty_putstr("Unknown command: ");
             tty_putstr(cmd_buffer);
