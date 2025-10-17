@@ -41,6 +41,8 @@ void tty_process_command(void) {
             tty_putstr("  time     - Display current time and date\n");
             tty_putstr("  timezone - Set timezone (timezone +/-H:M NAME or timezone list)\n");
             tty_putstr("  disk     - Show disk information\n");
+            tty_putstr("  reboot   - Reboot the system\n");
+            tty_putstr("  shutdown  - Shut down the system\n");
         } else if (strncmp(cmd_buffer, "cls", 3) == 0) {
             tty_clear();
             tty_row = 0;
@@ -588,6 +590,15 @@ void tty_process_command(void) {
             tty_putchar('0' + minutes / 10);
             tty_putchar('0' + minutes % 10);
             tty_putstr(")\n");
+        } else if (strncmp(cmd_buffer, "reboot", 6) == 0 && strlength(cmd_buffer) == 6) {
+            tty_putstr("Rebooting system...\n");
+            kernel_reboot();
+            // Should not return
+            for(;;) __asm__ volatile("hlt");
+        } else if (strncmp(cmd_buffer, "shutdown", 8) == 0 && strlength(cmd_buffer) == 8) {
+            tty_putstr("Shutting down system...\n");
+            kernel_shutdown();
+            for(;;) __asm__ volatile("hlt");
         } else {
             tty_putstr("Unknown command: ");
             tty_putstr(cmd_buffer);

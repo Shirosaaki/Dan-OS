@@ -65,6 +65,11 @@ void fb_function(void *multiboot_info) {
 void kernel_main(void *multiboot_info) {
     // Initialize terminal
     tty_init();
+    
+    tty_putstr("Welcome to DanOS!\n");
+    tty_putstr("=================\n\n");
+    //fb_function(multiboot_info);
+    tty_putstr("DanOS:/$ ");
     // Initialize interrupts
     idt_init();
     // Initialize keyboard
@@ -84,10 +89,6 @@ void kernel_main(void *multiboot_info) {
         tty_putstr("\nWarning: Filesystem initialization failed.\n");
         tty_putstr("Disk commands may not work.\n");
     }
-    tty_putstr("Welcome to DanOS!\n");
-    tty_putstr("=================\n\n");
-    //fb_function(multiboot_info);
-    tty_putstr("DanOS:/$ ");
     while (1) {
         __asm__ volatile("hlt"); // Halt until next interrupt
     }

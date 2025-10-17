@@ -8,6 +8,7 @@
     #include "vga.h"
     #include "string.h"
     #include "../../cpu/ports.h"
+    #include "power.h"
 
 
 void tty_process_command(void);

@@ -161,30 +161,6 @@ void pmm_init(void *multiboot_info, size_t memory_size) {
         }
     }
 
-    // Print stats to tty if available (use local helper to avoid depending on private symbols)
-    {
-        extern void tty_putstr(const char*);
-        if (&tty_putstr) {
-            // local hex printer
-            char hexbuf[19];
-            const char *hex = "0123456789ABCDEF";
-            uint64_t v64 = (uint64_t)physical_memory_base;
-            hexbuf[0] = '0'; hexbuf[1] = 'x';
-            for (int i = 0; i < 16; ++i) {
-                hexbuf[17 - i] = hex[v64 & 0xF];
-                v64 >>= 4;
-            }
-            hexbuf[18] = '\0';
-
-            tty_putstr("PMM: base=");
-            tty_putstr(hexbuf);
-            tty_putstr(" total_pages=");
-            // crude decimal print
-            char buf[32]; int pos=0; size_t v = total_pages; if (v==0) buf[pos++]='0'; else { char rev[32]; int r=0; while(v){rev[r++]= '0'+(v%10); v/=10;} while(r--) buf[pos++]=rev[r]; } buf[pos]=0; tty_putstr(buf);
-            tty_putstr(" free="); pos=0; v = free_pages; if (v==0) buf[pos++]='0'; else { char rev[32]; int r=0; while(v){rev[r++]= '0'+(v%10); v/=10;} while(r--) buf[pos++]=rev[r]; } buf[pos]=0; tty_putstr(buf);
-            tty_putstr("\n");
-        }
-    }
 }
 
 void *pmm_alloc_page(void) {
