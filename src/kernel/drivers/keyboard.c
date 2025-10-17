@@ -183,62 +183,64 @@ void keyboard_handler(void) {
         return;
     }
     
-    // Handle arrow keys - only if extended scancode
+    // Handle extended scancodes (0xE0 prefix)
     if (extended_scancode) {
         extended_scancode = 0; // Reset flag
+
+        // Arrow keys (E0 48/50/4B/4D)
         if (scancode == 0x48) {
-            // Up arrow
             tty_cursor_up();
             return;
         }
         if (scancode == 0x50) {
-            // Down arrow
             tty_cursor_down();
             return;
         }
         if (scancode == 0x4B) {
-            // Left arrow
             tty_cursor_left();
             return;
         }
         if (scancode == 0x4D) {
-            // Right arrow
             tty_cursor_right();
             return;
         }
-        // Handle other extended scancodes here if needed
-        return; // Ignore unhandled extended scancodes
-    }
-    
-    // Handle some common extended scancodes directly
-    if (scancode == 0x9C) {
-        // Numpad Enter (extended scancode 0x1C with 0xE0 prefix)
-        c = '\n';
-        keyboard_buffer_add(c);
-        
-        if (tty_is_editor_mode()) {
-            tty_putchar('\n');
-            tty_editor_add_char(c);
-        } else {
-            tty_putchar('\n');
-            tty_process_command();
+
+        // Numpad Enter (E0 1C)
+        if (scancode == 0x1C) {
+            c = '\n';
+            keyboard_buffer_add(c);
+
+            if (tty_is_editor_mode()) {
+                tty_putchar('\n');
+                tty_editor_add_char(c);
+            } else {
+                tty_putchar('\n');
+                tty_process_command();
+            }
+            return;
         }
+
+        // Numpad Division '/' (E0 35)
+        if (scancode == 0x35) {
+            c = '/';
+            keyboard_buffer_add(c);
+
+            if (tty_is_editor_mode()) {
+                tty_putchar(c);
+                tty_editor_add_char(c);
+            } else {
+                tty_putchar(c);
+            }
+            return;
+        }
+
+        // Unhandled extended scancode - ignore
         return;
     }
     
-    if (scancode == 0xB5) {
-        // Numpad Division (extended scancode 0x35 with 0xE0 prefix)
-        c = '/';
-        keyboard_buffer_add(c);
-        
-        if (tty_is_editor_mode()) {
-            tty_putchar(c);
-            tty_editor_add_char(c);
-        } else {
-            tty_putchar(c);
-        }
-        return;
-    }
+    // Note: extended (E0-prefixed) make codes for Numpad Enter and Division
+    // are handled above in the extended_scancode branch. The release codes
+    // (with 0x80 bit set) are handled in the release path earlier.
     
     // Handle numpad multiply (scancode 0x37)
     if (scancode == 0x37) {
