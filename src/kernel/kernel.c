@@ -13,6 +13,7 @@
 #include "mouse.h"
 #include <stdint.h>
 #include "pmm.h"
+#include "vmm.h"
 
 // forward declare fb functions
 int fb_init(void *multiboot_info_ptr);
@@ -41,6 +42,8 @@ void kernel_main(void *multiboot_info) {
 
     // Initialize physical memory manager (bitmap allocator)
     pmm_init(multiboot_info, 0);
+    // Initialize virtual memory manager (page table helpers)
+    vmm_init();
     // Initialize FAT32 filesystem
     if (fat32_init() != 0) {
         tty_putstr("\nWarning: Filesystem initialization failed.\n");

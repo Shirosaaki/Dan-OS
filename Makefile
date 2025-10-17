@@ -7,27 +7,30 @@ DRV_SRCS 	=	$(wildcard src/kernel/drivers/*.c)
 CPU_SRCS 	=	$(wildcard src/cpu/*.c)
 COMMAND_SRCS =  $(wildcard src/kernel/commands/*.c)
 PMM_SRCS 	=	$(wildcard src/kernel/pmm/*.c)
+VMM_SRCS    =   $(wildcard src/kernel/vmm/*.c)
 
-ASM_PATH 	= 	src/bootloader/%.asm
-KERNEL_PATH = 	src/kernel/%.c
-TTY_PATH 	= 	src/kernel/tty/%.c
-STR_PATH 	= 	src/kernel/string/%.c
-DRV_PATH 	= 	src/kernel/drivers/%.c
-CPU_PATH 	= 	src/cpu/%.c
-OBJ_PATH 	= 	obj/%.o
-COMMAND_PATH =  src/kernel/commands/%.c
-PMM_PATH =  src/kernel/pmm/%.c
+ASM_PATH 		= 	src/bootloader/%.asm
+KERNEL_PATH 	= 	src/kernel/%.c
+TTY_PATH 		= 	src/kernel/tty/%.c
+STR_PATH 		= 	src/kernel/string/%.c
+DRV_PATH 		= 	src/kernel/drivers/%.c
+CPU_PATH 		= 	src/cpu/%.c
+COMMAND_PATH 	= 	src/kernel/commands/%.c
+PMM_PATH 		= 	src/kernel/pmm/%.c
+VMM_PATH 		= 	src/kernel/vmm/%.c
+OBJ_PATH 		= 	obj/%.o
 
-ASM_OBJS 	= 	$(patsubst $(ASM_PATH), $(OBJ_PATH), $(ASM_SRCS))
-KERNEL_OBJS = 	$(patsubst $(KERNEL_PATH), $(OBJ_PATH), $(KERNEL_SRCS))
-TTY_OBJS 	= 	$(patsubst $(TTY_PATH), $(OBJ_PATH), $(TTY_SRCS))
-STR_OBJS 	= 	$(patsubst $(STR_PATH), $(OBJ_PATH), $(STR_SRCS))
-DRV_OBJS 	= 	$(patsubst $(DRV_PATH), $(OBJ_PATH), $(DRV_SRCS))
-CPU_OBJS 	= 	$(patsubst $(CPU_PATH), $(OBJ_PATH), $(CPU_SRCS))
-COMMAND_OBJS =  $(patsubst $(COMMAND_PATH), $(OBJ_PATH), $(COMMAND_SRCS))
-PMM_OBJS =  $(patsubst $(PMM_PATH), $(OBJ_PATH), $(PMM_SRCS))
+ASM_OBJS 		= 	$(patsubst $(ASM_PATH), $(OBJ_PATH), $(ASM_SRCS))
+KERNEL_OBJS 	= 	$(patsubst $(KERNEL_PATH), $(OBJ_PATH), $(KERNEL_SRCS))
+TTY_OBJS 		= 	$(patsubst $(TTY_PATH), $(OBJ_PATH), $(TTY_SRCS))
+STR_OBJS 		= 	$(patsubst $(STR_PATH), $(OBJ_PATH), $(STR_SRCS))
+DRV_OBJS 		= 	$(patsubst $(DRV_PATH), $(OBJ_PATH), $(DRV_SRCS))
+CPU_OBJS 		= 	$(patsubst $(CPU_PATH), $(OBJ_PATH), $(CPU_SRCS))
+COMMAND_OBJS 	= 	$(patsubst $(COMMAND_PATH), $(OBJ_PATH), $(COMMAND_SRCS))
+PMM_OBJS 		= 	$(patsubst $(PMM_PATH), $(OBJ_PATH), $(PMM_SRCS))
+VMM_OBJS 		= 	$(patsubst $(VMM_PATH), $(OBJ_PATH), $(VMM_SRCS))
 
-OBJS 		= 	$(ASM_OBJS) $(KERNEL_OBJS) $(TTY_OBJS) $(STR_OBJS) $(DRV_OBJS) $(CPU_OBJS) $(COMMAND_OBJS) $(PMM_OBJS)
+OBJS 		= 	$(ASM_OBJS) $(KERNEL_OBJS) $(TTY_OBJS) $(STR_OBJS) $(DRV_OBJS) $(CPU_OBJS) $(COMMAND_OBJS) $(PMM_OBJS) $(VMM_OBJS)
 
 NAME 		= 	DanOs
 BIN 		= 	target/x86_64/iso/boot/kernel.bin
@@ -73,6 +76,10 @@ $(COMMAND_OBJS): $(OBJ_PATH): $(COMMAND_PATH)
 $(PMM_OBJS): $(OBJ_PATH): $(PMM_PATH)
 	@ $(MK) $(dir $@) && \
 	$(CC) -c $(patsubst $(OBJ_PATH), $(PMM_PATH), $@) -o $@
+
+$(VMM_OBJS): $(OBJ_PATH): $(VMM_PATH)
+	@ $(MK) $(dir $@) && \
+	$(CC) -c $(patsubst $(OBJ_PATH), $(VMM_PATH), $@) -o $@
 
 $(ASM_OBJS): $(OBJ_PATH): $(ASM_PATH)
 	@ $(MK) $(dir $@) && \
