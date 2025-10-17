@@ -12,19 +12,7 @@
 #include "string.h"
 #include "mouse.h"
 #include <stdint.h>
-
-// Debug helper: print 64-bit value in hex via tty
-static void tty_puthex64(uint64_t v) {
-    char buf[17];
-    const char *hex = "0123456789ABCDEF";
-    for (int i = 0; i < 16; ++i) {
-        buf[15 - i] = hex[v & 0xF];
-        v >>= 4;
-    }
-    buf[16] = '\0';
-    tty_putstr("0x");
-    tty_putstr(buf);
-}
+#include "pmm.h"
 
 // forward declare fb functions
 int fb_init(void *multiboot_info_ptr);
@@ -50,6 +38,9 @@ void kernel_main(void *multiboot_info) {
     rtc_init();
     // Initialize ATA disk driver
     ata_init();
+
+    // Initialize physical memory manager (bitmap allocator)
+    pmm_init(multiboot_info, 0);
     // Initialize FAT32 filesystem
     if (fat32_init() != 0) {
         tty_putstr("\nWarning: Filesystem initialization failed.\n");

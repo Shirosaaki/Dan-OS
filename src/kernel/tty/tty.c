@@ -195,6 +195,18 @@ void tty_putdec(uint32_t num) {
     }
 }
 
+void tty_puthex64(uint64_t v) {
+    char buf[17];
+    const char *hex = "0123456789ABCDEF";
+    for (int i = 0; i < 16; ++i) {
+        buf[15 - i] = hex[v & 0xF];
+        v >>= 4;
+    }
+    buf[16] = '\0';
+    tty_putstr("0x");
+    tty_putstr(buf);
+}
+
 void tty_middle_screen(const char* data) {
     size_t len = strlength(data);
     size_t x = (VGA_WIDTH - len) / 2;
