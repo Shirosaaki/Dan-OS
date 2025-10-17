@@ -82,13 +82,13 @@ void kernel_main(void *multiboot_info) {
     pmm_init(multiboot_info, 0);
     // Initialize virtual memory manager (page table helpers)
     vmm_init();
-    // Initialize timezone system (requires filesystem)
-    timezone_init();
     // Initialize FAT32 filesystem
     if (fat32_init() != 0) {
         tty_putstr("\nWarning: Filesystem initialization failed.\n");
         tty_putstr("Disk commands may not work.\n");
     }
+    // Initialize timezone system (requires filesystem)
+    timezone_init();
     while (1) {
         __asm__ volatile("hlt"); // Halt until next interrupt
     }
