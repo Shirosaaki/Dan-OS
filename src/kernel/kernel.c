@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include "pmm.h"
 #include "vmm.h"
+#include "scheduler.h"
 
 // forward declare fb functions
 int fb_init(void *multiboot_info_ptr);
@@ -82,6 +83,11 @@ void kernel_main(void *multiboot_info) {
     pmm_init(multiboot_info, 0);
     // Initialize virtual memory manager (page table helpers)
     vmm_init();
+    // Initialize scheduler
+    scheduler_init();
+    // Add a simple test kernel thread
+    extern void test_thread(void);
+    scheduler_add_task(test_thread);
     // Initialize FAT32 filesystem
     if (fat32_init() != 0) {
         tty_putstr("\nWarning: Filesystem initialization failed.\n");
@@ -91,5 +97,12 @@ void kernel_main(void *multiboot_info) {
     timezone_init();
     while (1) {
         __asm__ volatile("hlt"); // Halt until next interrupt
+    }
+}
+
+void test_thread(void) {
+    while (1) {
+        tty_putstr("[thread] tick\n");
+        for (volatile int i = 0; i < 1000000; ++i) __asm__ volatile ("nop");
     }
 }

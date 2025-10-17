@@ -1,4 +1,5 @@
 ASM_SRCS 	=	$(wildcard src/bootloader/*.asm)
+ASMS64_SRCS = $(wildcard src/kernel/*.S)
 
 KERNEL_SRCS =	$(wildcard src/kernel/*.c)
 TTY_SRCS 	=	$(wildcard src/kernel/tty/*.c)
@@ -21,6 +22,7 @@ VMM_PATH 		= 	src/kernel/vmm/%.c
 OBJ_PATH 		= 	obj/%.o
 
 ASM_OBJS 		= 	$(patsubst $(ASM_PATH), $(OBJ_PATH), $(ASM_SRCS))
+ASMS64_OBJS 	= 	$(patsubst src/kernel/%.S, $(OBJ_PATH), $(ASMS64_SRCS))
 KERNEL_OBJS 	= 	$(patsubst $(KERNEL_PATH), $(OBJ_PATH), $(KERNEL_SRCS))
 TTY_OBJS 		= 	$(patsubst $(TTY_PATH), $(OBJ_PATH), $(TTY_SRCS))
 STR_OBJS 		= 	$(patsubst $(STR_PATH), $(OBJ_PATH), $(STR_SRCS))
@@ -30,7 +32,7 @@ COMMAND_OBJS 	= 	$(patsubst $(COMMAND_PATH), $(OBJ_PATH), $(COMMAND_SRCS))
 PMM_OBJS 		= 	$(patsubst $(PMM_PATH), $(OBJ_PATH), $(PMM_SRCS))
 VMM_OBJS 		= 	$(patsubst $(VMM_PATH), $(OBJ_PATH), $(VMM_SRCS))
 
-OBJS 		= 	$(ASM_OBJS) $(KERNEL_OBJS) $(TTY_OBJS) $(STR_OBJS) $(DRV_OBJS) $(CPU_OBJS) $(COMMAND_OBJS) $(PMM_OBJS) $(VMM_OBJS)
+OBJS 		= 	$(ASM_OBJS) $(ASMS64_OBJS) $(KERNEL_OBJS) $(TTY_OBJS) $(STR_OBJS) $(DRV_OBJS) $(CPU_OBJS) $(COMMAND_OBJS) $(PMM_OBJS) $(VMM_OBJS)
 
 NAME 		= 	DanOs
 BIN 		= 	target/x86_64/iso/boot/kernel.bin
@@ -84,6 +86,10 @@ $(VMM_OBJS): $(OBJ_PATH): $(VMM_PATH)
 $(ASM_OBJS): $(OBJ_PATH): $(ASM_PATH)
 	@ $(MK) $(dir $@) && \
 	$(NASM) $(patsubst $(OBJ_PATH), $(ASM_PATH), $@) -o $@
+
+$(ASMS64_OBJS): $(OBJ_PATH): src/kernel/%.S
+	@ $(MK) $(dir $@) && \
+	$(CC) -c src/kernel/$*.S -o $@
 
 .PHONY: build
 build: $(OBJS)

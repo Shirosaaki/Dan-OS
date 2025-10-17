@@ -138,6 +138,7 @@ isr_common_stub:
     iretq
 
 extern irq_handler
+extern scheduler_switch
 
 ; Common IRQ stub
 irq_common_stub:
@@ -163,6 +164,12 @@ irq_common_stub:
     
     ; Call C handler
     call irq_handler
+
+    ; Pass pointer to saved registers (current rsp) to scheduler and get new rsp in rax
+    mov rdi, rsp
+    call scheduler_switch
+    ; If scheduler returned a different saved-registers pointer, switch stack to it
+    mov rsp, rax
 
     ; Restore all registers
     pop r15
