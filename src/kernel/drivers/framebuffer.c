@@ -1,8 +1,8 @@
 // Basic framebuffer driver using Multiboot2 framebuffer tag (GRUB)
 #include "framebuffer.h"
 #include "font8x8.h"
-#include "../tty/../includes/string.h"
-#include "../tty/../includes/tty.h"
+#include "string.h"
+#include "tty.h"
 #include <stdint.h>
 #include <stddef.h>
 

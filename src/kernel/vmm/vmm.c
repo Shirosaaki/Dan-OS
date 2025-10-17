@@ -2,7 +2,7 @@
 #include "pmm.h"
 #include <stdint.h>
 #include <stddef.h>
-#include "../includes/string.h"
+#include "string.h"
 
 // Each page table is 4096 bytes and contains 512 8-byte entries
 #define ENTRIES_PER_TABLE 512
