@@ -15,6 +15,7 @@
 #include "pmm.h"
 #include "vmm.h"
 #include "scheduler.h"
+#include "syscall.h"
 
 // forward declare fb functions
 int fb_init(void *multiboot_info_ptr);
@@ -85,6 +86,8 @@ void kernel_main(void *multiboot_info) {
     vmm_init();
     // Initialize scheduler
     scheduler_init();
+    // Initialize syscall mechanism
+    syscall_init();
     // Add a simple test kernel thread
     extern void test_thread(void);
     scheduler_add_task(test_thread);

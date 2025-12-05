@@ -1,5 +1,6 @@
 ; interrupts.asm - Interrupt Service Routines
 global idt_load
+global syscall_entry
 
 section .text
 bits 64
@@ -8,6 +9,68 @@ bits 64
 idt_load:
     lidt [rdi]
     ret
+
+; ============================================
+; Syscall entry point (called via syscall instruction)
+; ============================================
+; On entry:
+;   rax = syscall number
+;   rdi = arg1
+;   rsi = arg2
+;   rdx = arg3
+;   r10 = arg4 (rcx is clobbered by syscall)
+;   r8  = arg5
+;   r9  = arg6
+;   rcx = return address (set by CPU)
+;   r11 = saved RFLAGS (set by CPU)
+; ============================================
+
+extern syscall_handler
+
+syscall_entry:
+    ; Save user stack pointer and switch to kernel stack
+    ; For now, we'll use the current stack (kernel mode only execution)
+    
+    ; Save registers that syscall_handler might clobber
+    push rcx        ; Save return address
+    push r11        ; Save RFLAGS
+    push rbp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    
+    ; Setup arguments for syscall_handler(syscall_num, arg1, arg2, arg3, arg4, arg5)
+    ; rax already has syscall number, but we need to move it to rdi
+    ; Current: rax=syscall_num, rdi=arg1, rsi=arg2, rdx=arg3, r10=arg4, r8=arg5
+    ; Target:  rdi=syscall_num, rsi=arg1, rdx=arg2, rcx=arg3, r8=arg4, r9=arg5
+    
+    mov r9, r8      ; arg5 -> r9
+    mov r8, r10     ; arg4 -> r8
+    mov rcx, rdx    ; arg3 -> rcx
+    mov rdx, rsi    ; arg2 -> rdx
+    mov rsi, rdi    ; arg1 -> rsi
+    mov rdi, rax    ; syscall_num -> rdi
+    
+    ; Call the C handler
+    call syscall_handler
+    
+    ; Result is in rax, which is correct for return value
+    
+    ; Restore saved registers
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    pop r11         ; Restore RFLAGS
+    pop rcx         ; Restore return address
+    
+    ; Return to user mode
+    ; sysretq sets RIP = RCX, RFLAGS = R11
+    sysretq
 
 ; Macro for ISRs without error codes
 %macro ISR_NOERRCODE 1
