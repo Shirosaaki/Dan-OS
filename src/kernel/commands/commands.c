@@ -173,8 +173,15 @@ void tty_process_command(void) {
             if (filename[0] == '\0') {
                 tty_putstr("Usage: wr filename\n");
                 tty_putstr("Example: wr document.txt\n");
-                tty_putstr("Press Ctrl to save and exit editor\n");
+                tty_putstr("Press Ctrl+S to save, Ctrl+E to exit editor\n");
             } else {
+                // Add command to history before entering editor mode
+                tty_history_commit();
+                
+                // Reset command buffer
+                cmd_buffer_pos = 0;
+                cmd_cursor_pos = 0;
+                
                 // Start editor mode
                 tty_start_editor_mode(filename);
                 return; // Don't print prompt, we're in editor mode
