@@ -368,7 +368,7 @@ static void editor_calculate_screen_pos(int buffer_pos, size_t* out_row, size_t*
     }
 }
 
-// Helper: Redraw all editor content
+// Helper: Redraw all editor content with selection highlighting
 static void editor_full_redraw(void) {
     // Clear screen from editor start
     for (size_t y = editor_content_start_row; y < VGA_HEIGHT; y++) {
@@ -376,6 +376,13 @@ static void editor_full_redraw(void) {
             const size_t index = y * VGA_WIDTH + x;
             tty_buffer[index] = vga_entry(' ', tty_color);
         }
+    }
+    
+    // Calculate selection bounds
+    int sel_min = -1, sel_max = -1;
+    if (selection_active) {
+        sel_min = selection_start < selection_end ? selection_start : selection_end;
+        sel_max = selection_start < selection_end ? selection_end : selection_start;
     }
     
     // Redraw all content
@@ -388,9 +395,15 @@ static void editor_full_redraw(void) {
             tty_row++;
             tty_column = 0;
         } else {
+            // Determine color (highlighted if in selection)
+            uint8_t color = tty_color;
+            if (selection_active && i >= sel_min && i < sel_max) {
+                color = vga_entry_color(PRINT_COLOR_BLACK, PRINT_COLOR_YELLOW);
+            }
+            
             // Put character
             const size_t index = tty_row * VGA_WIDTH + tty_column;
-            tty_buffer[index] = vga_entry(editor_buffer[i], tty_color);
+            tty_buffer[index] = vga_entry(editor_buffer[i], color);
             tty_column++;
             if (tty_column >= VGA_WIDTH) {
                 tty_column = 0;
@@ -466,7 +479,7 @@ void tty_exit_editor_mode(void) {
     tty_row = 0;
     tty_column = 0;
     
-    tty_putstr("Editor closed (not saved)\n");
+    tty_putstr("Editor closed\n");
     
     cmd_buffer_pos = 0; // Clear command buffer
     cmd_cursor_pos = 0;
@@ -582,6 +595,11 @@ void tty_cursor_left(void) {
             // Update screen cursor
             editor_calculate_screen_pos(editor_cursor_pos, &tty_row, &tty_column);
             set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+            
+            // Update selection if active
+            if (selection_active) {
+                tty_update_selection();
+            }
         }
     } else {
         // In command mode - respect command buffer boundaries
@@ -611,6 +629,11 @@ void tty_cursor_right(void) {
             // Update screen cursor
             editor_calculate_screen_pos(editor_cursor_pos, &tty_row, &tty_column);
             set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+            
+            // Update selection if active
+            if (selection_active) {
+                tty_update_selection();
+            }
         }
     } else {
         // In command mode - can't move past end of typed text
@@ -663,6 +686,11 @@ void tty_cursor_up(void) {
             // Update screen cursor
             editor_calculate_screen_pos(editor_cursor_pos, &tty_row, &tty_column);
             set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+            
+            // Update selection if active
+            if (selection_active) {
+                tty_update_selection();
+            }
         }
     } else {
         // Command mode - TODO: command history
@@ -712,6 +740,11 @@ void tty_cursor_down(void) {
             // Update screen cursor
             editor_calculate_screen_pos(editor_cursor_pos, &tty_row, &tty_column);
             set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+            
+            // Update selection if active
+            if (selection_active) {
+                tty_update_selection();
+            }
         }
     }
     // In command mode, up/down is handled by tty_history_up/down
@@ -1073,22 +1106,30 @@ static void redraw_cmd_with_selection(void) {
 
 // Start selection mode (Ctrl+Space)
 void tty_start_selection(void) {
-    if (editor_mode) return; // Not supported in editor mode yet
-    
     selection_active = 1;
-    selection_start = cmd_cursor_pos;
-    selection_end = cmd_cursor_pos;
     
-    // Visual feedback
-    redraw_cmd_with_selection();
+    if (editor_mode) {
+        selection_start = editor_cursor_pos;
+        selection_end = editor_cursor_pos;
+        editor_full_redraw();
+    } else {
+        selection_start = cmd_cursor_pos;
+        selection_end = cmd_cursor_pos;
+        redraw_cmd_with_selection();
+    }
 }
 
 // Update selection end when cursor moves
 void tty_update_selection(void) {
     if (!selection_active) return;
     
-    selection_end = cmd_cursor_pos;
-    redraw_cmd_with_selection();
+    if (editor_mode) {
+        selection_end = editor_cursor_pos;
+        editor_full_redraw();
+    } else {
+        selection_end = cmd_cursor_pos;
+        redraw_cmd_with_selection();
+    }
 }
 
 // Cancel selection
@@ -1099,34 +1140,36 @@ void tty_cancel_selection(void) {
     selection_start = -1;
     selection_end = -1;
     
-    // Redraw without highlighting
-    tty_row = prompt_row;
-    tty_column = prompt_column;
-    
-    for (int i = 0; i < cmd_buffer_pos; i++) {
-        const size_t index = tty_row * VGA_WIDTH + tty_column;
-        tty_buffer[index] = vga_entry(cmd_buffer[i], tty_color);
-        tty_column++;
-        if (tty_column >= VGA_WIDTH) {
-            tty_column = 0;
+    if (editor_mode) {
+        editor_full_redraw();
+    } else {
+        // Redraw without highlighting
+        tty_row = prompt_row;
+        tty_column = prompt_column;
+        
+        for (int i = 0; i < cmd_buffer_pos; i++) {
+            const size_t index = tty_row * VGA_WIDTH + tty_column;
+            tty_buffer[index] = vga_entry(cmd_buffer[i], tty_color);
+            tty_column++;
+            if (tty_column >= VGA_WIDTH) {
+                tty_column = 0;
+                tty_row++;
+            }
+        }
+        
+        // Restore cursor position
+        tty_row = prompt_row;
+        tty_column = prompt_column + cmd_cursor_pos;
+        while (tty_column >= VGA_WIDTH) {
+            tty_column -= VGA_WIDTH;
             tty_row++;
         }
+        set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
     }
-    
-    // Restore cursor position
-    tty_row = prompt_row;
-    tty_column = prompt_column + cmd_cursor_pos;
-    while (tty_column >= VGA_WIDTH) {
-        tty_column -= VGA_WIDTH;
-        tty_row++;
-    }
-    set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
 }
 
 // Copy selection to clipboard (Ctrl+C)
 void tty_copy(void) {
-    if (editor_mode) return;
-    
     if (!selection_active || selection_start == selection_end) {
         // No selection - nothing to copy
         return;
@@ -1135,10 +1178,16 @@ void tty_copy(void) {
     int sel_min = selection_start < selection_end ? selection_start : selection_end;
     int sel_max = selection_start < selection_end ? selection_end : selection_start;
     
-    // Copy to clipboard
+    // Copy to clipboard from appropriate buffer
     clipboard_len = 0;
-    for (int i = sel_min; i < sel_max && clipboard_len < CLIPBOARD_SIZE - 1; i++) {
-        clipboard[clipboard_len++] = cmd_buffer[i];
+    if (editor_mode) {
+        for (int i = sel_min; i < sel_max && clipboard_len < CLIPBOARD_SIZE - 1; i++) {
+            clipboard[clipboard_len++] = editor_buffer[i];
+        }
+    } else {
+        for (int i = sel_min; i < sel_max && clipboard_len < CLIPBOARD_SIZE - 1; i++) {
+            clipboard[clipboard_len++] = cmd_buffer[i];
+        }
     }
     clipboard[clipboard_len] = '\0';
     
@@ -1148,8 +1197,6 @@ void tty_copy(void) {
 
 // Paste from clipboard (Ctrl+V)
 void tty_paste(void) {
-    if (editor_mode) return;
-    
     if (clipboard_len == 0) return; // Nothing to paste
     
     // Cancel any active selection
@@ -1157,45 +1204,63 @@ void tty_paste(void) {
         tty_cancel_selection();
     }
     
-    // Insert clipboard content at cursor position
-    for (int c = 0; c < clipboard_len; c++) {
-        if (cmd_buffer_pos >= CMD_BUFFER_SIZE - 1) break;
-        
-        // Shift characters right
-        for (int i = cmd_buffer_pos; i > cmd_cursor_pos; i--) {
-            cmd_buffer[i] = cmd_buffer[i - 1];
+    if (editor_mode) {
+        // Paste into editor buffer
+        for (int c = 0; c < clipboard_len; c++) {
+            if (editor_buffer_pos >= EDITOR_BUFFER_SIZE - 1) break;
+            
+            // Shift characters right
+            for (int i = editor_buffer_pos; i > editor_cursor_pos; i--) {
+                editor_buffer[i] = editor_buffer[i - 1];
+            }
+            editor_buffer[editor_cursor_pos] = clipboard[c];
+            editor_buffer_pos++;
+            editor_cursor_pos++;
         }
-        cmd_buffer[cmd_cursor_pos] = clipboard[c];
-        cmd_buffer_pos++;
-        cmd_cursor_pos++;
-    }
-    
-    // Redraw the command line
-    tty_row = prompt_row;
-    tty_column = prompt_column;
-    
-    for (int i = 0; i < cmd_buffer_pos; i++) {
+        
+        // Redraw editor
+        editor_full_redraw();
+    } else {
+        // Paste into command buffer
+        for (int c = 0; c < clipboard_len; c++) {
+            if (cmd_buffer_pos >= CMD_BUFFER_SIZE - 1) break;
+            
+            // Shift characters right
+            for (int i = cmd_buffer_pos; i > cmd_cursor_pos; i--) {
+                cmd_buffer[i] = cmd_buffer[i - 1];
+            }
+            cmd_buffer[cmd_cursor_pos] = clipboard[c];
+            cmd_buffer_pos++;
+            cmd_cursor_pos++;
+        }
+        
+        // Redraw the command line
+        tty_row = prompt_row;
+        tty_column = prompt_column;
+        
+        for (int i = 0; i < cmd_buffer_pos; i++) {
+            const size_t index = tty_row * VGA_WIDTH + tty_column;
+            tty_buffer[index] = vga_entry(cmd_buffer[i], tty_color);
+            tty_column++;
+            if (tty_column >= VGA_WIDTH) {
+                tty_column = 0;
+                tty_row++;
+            }
+        }
+        
+        // Clear any leftover characters
         const size_t index = tty_row * VGA_WIDTH + tty_column;
-        tty_buffer[index] = vga_entry(cmd_buffer[i], tty_color);
-        tty_column++;
-        if (tty_column >= VGA_WIDTH) {
-            tty_column = 0;
+        tty_buffer[index] = vga_entry(' ', tty_color);
+        
+        // Position cursor
+        tty_row = prompt_row;
+        tty_column = prompt_column + cmd_cursor_pos;
+        while (tty_column >= VGA_WIDTH) {
+            tty_column -= VGA_WIDTH;
             tty_row++;
         }
+        set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
     }
-    
-    // Clear any leftover characters
-    const size_t index = tty_row * VGA_WIDTH + tty_column;
-    tty_buffer[index] = vga_entry(' ', tty_color);
-    
-    // Position cursor
-    tty_row = prompt_row;
-    tty_column = prompt_column + cmd_cursor_pos;
-    while (tty_column >= VGA_WIDTH) {
-        tty_column -= VGA_WIDTH;
-        tty_row++;
-    }
-    set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
 }
 
 // Check if selection is active
