@@ -138,6 +138,12 @@ void idt_init(void) {
 
 // ISR handler
 void isr_handler(uint64_t int_no) {
+    if (int_no == 14) {
+        tty_putstr("Page fault (int 14) — halting.\n");
+        // Stop further interrupts to avoid flood while debugging
+        __asm__ volatile("cli; hlt");
+    }
+
     tty_putstr("Received interrupt: ");
     // Simple number printing (for debugging)
     char num[3];
