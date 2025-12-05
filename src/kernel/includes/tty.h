@@ -28,6 +28,17 @@
 	void tty_cursor_up(void);
 	void tty_cursor_down(void);
 	
+	// Command history functions
+	void tty_history_up(void);
+	void tty_history_down(void);
+	void tty_history_commit(void);
+	void tty_set_prompt_position(void);
+	void tty_print_history(void);
+	
+	// Control flow / signal functions
+	void tty_signal_stop(void);
+	int tty_check_stop(void);
+	
 	// Text editor functions
 	void tty_start_editor_mode(const char* filename);
 	void tty_exit_editor_mode(void);

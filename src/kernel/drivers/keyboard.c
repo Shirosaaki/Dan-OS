@@ -156,6 +156,13 @@ void keyboard_handler(void) {
         return;
     }
     
+    // Handle Ctrl+D to stop running program / signal EOF
+    if (ctrl_pressed && (scancode == 0x20)) { // 'd' key scancode
+        // Signal to stop current process
+        tty_signal_stop();
+        return;
+    }
+    
     if (scancode == 0x3A) {
         // Caps lock toggle
         caps_lock = !caps_lock;
@@ -189,11 +196,21 @@ void keyboard_handler(void) {
 
         // Arrow keys (E0 48/50/4B/4D)
         if (scancode == 0x48) {
-            tty_cursor_up();
+            // Up arrow - show previous command in history (when not in editor)
+            if (!tty_is_editor_mode()) {
+                tty_history_up();
+            } else {
+                tty_cursor_up();
+            }
             return;
         }
         if (scancode == 0x50) {
-            tty_cursor_down();
+            // Down arrow - show next command in history (when not in editor)
+            if (!tty_is_editor_mode()) {
+                tty_history_down();
+            } else {
+                tty_cursor_down();
+            }
             return;
         }
         if (scancode == 0x4B) {

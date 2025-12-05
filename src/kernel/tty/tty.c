@@ -8,6 +8,7 @@
 #include "vga.h"
 #include "../../cpu/ports.h"
 #include "fat32.h"
+#include "rtc.h"
 
 // Make these non-static so they can be accessed from commands.c
 size_t tty_row;
@@ -22,6 +23,19 @@ char cmd_buffer[CMD_BUFFER_SIZE];
 int cmd_buffer_pos = 0;
 int cmd_cursor_pos = 0; // Cursor position in command buffer (non-static for commands.c)
 static size_t prompt_column = 0; // Column where prompt ends
+static size_t prompt_row = 0;    // Row where prompt starts
+
+// Command history
+#define HISTORY_SIZE 16
+#define HISTORY_CMD_SIZE 256
+static char history[HISTORY_SIZE][HISTORY_CMD_SIZE];
+static int history_count = 0;      // Total commands in history
+static int history_index = -1;     // Current position when navigating (-1 = current input)
+static char temp_cmd_buffer[CMD_BUFFER_SIZE]; // Store current input when navigating history
+static int temp_cmd_saved = 0;     // Flag: have we saved current input?
+
+// Stop signal flag for Ctrl+D
+static volatile int stop_signal = 0;
 
 // Editor mode variables
 static int editor_mode = 0;
@@ -130,13 +144,51 @@ void tty_putchar_internal(char c) {
 }
 
 // Public version - used by keyboard to echo characters
+// Uses insert mode: typing inserts character at cursor and shifts rest right
 void tty_putchar(char c) {
     // Add printable characters to command buffer
     if (c != '\b' && c != '\n' && cmd_buffer_pos < CMD_BUFFER_SIZE - 1) {
-        cmd_buffer[cmd_buffer_pos++] = c;
-        cmd_cursor_pos = cmd_buffer_pos; // Keep cursor at end
+        if (cmd_cursor_pos < cmd_buffer_pos) {
+            // Insert mode: shift characters right and insert at cursor position
+            for (int i = cmd_buffer_pos; i > cmd_cursor_pos; i--) {
+                cmd_buffer[i] = cmd_buffer[i - 1];
+            }
+            cmd_buffer[cmd_cursor_pos] = c;
+            cmd_buffer_pos++;
+            cmd_cursor_pos++;
+            
+            // Redraw from cursor position to end
+            size_t saved_row = tty_row;
+            size_t saved_col = tty_column;
+            
+            // Draw the inserted char and all following chars
+            for (int i = cmd_cursor_pos - 1; i < cmd_buffer_pos; i++) {
+                const size_t index = tty_row * VGA_WIDTH + tty_column;
+                tty_buffer[index] = vga_entry(cmd_buffer[i], tty_color);
+                tty_column++;
+                if (tty_column >= VGA_WIDTH) {
+                    tty_column = 0;
+                    tty_row++;
+                }
+            }
+            
+            // Move cursor to correct position (after inserted char)
+            tty_row = saved_row;
+            tty_column = saved_col + 1;
+            if (tty_column >= VGA_WIDTH) {
+                tty_column = 0;
+                tty_row++;
+            }
+            set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+        } else {
+            // At end of buffer: just append normally
+            cmd_buffer[cmd_buffer_pos++] = c;
+            cmd_cursor_pos++;
+            tty_putchar_internal(c);
+        }
+    } else if (c == '\n') {
+        tty_putchar_internal(c);
     }
-    tty_putchar_internal(c);
 }
 
 void tty_putnbr(int num) {
@@ -243,11 +295,18 @@ void tty_backspace(void) {
         tty_buffer[index] = vga_entry(' ', tty_color);
         set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
     } else {
-        // Normal command mode
-        if (cmd_buffer_pos > 0) {
+        // Normal command mode with cursor support
+        if (cmd_cursor_pos > 0) {
+            // Delete character before cursor position
+            cmd_cursor_pos--;
+            
+            // Shift all characters after cursor left by one
+            for (int i = cmd_cursor_pos; i < cmd_buffer_pos - 1; i++) {
+                cmd_buffer[i] = cmd_buffer[i + 1];
+            }
             cmd_buffer_pos--;
             
-            // Move cursor back
+            // Move screen cursor back
             if (tty_column > 0) {
                 tty_column--;
             } else if (tty_row > 0) {
@@ -255,9 +314,28 @@ void tty_backspace(void) {
                 tty_column = VGA_WIDTH - 1;
             }
             
-            // Clear the character
+            // Redraw from cursor position to end of command
+            size_t saved_row = tty_row;
+            size_t saved_col = tty_column;
+            
+            // Redraw remaining characters
+            for (int i = cmd_cursor_pos; i < cmd_buffer_pos; i++) {
+                const size_t index = tty_row * VGA_WIDTH + tty_column;
+                tty_buffer[index] = vga_entry(cmd_buffer[i], tty_color);
+                tty_column++;
+                if (tty_column >= VGA_WIDTH) {
+                    tty_column = 0;
+                    tty_row++;
+                }
+            }
+            
+            // Clear the last character position (which is now empty)
             const size_t index = tty_row * VGA_WIDTH + tty_column;
             tty_buffer[index] = vga_entry(' ', tty_color);
+            
+            // Restore cursor position
+            tty_row = saved_row;
+            tty_column = saved_col;
             set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
         }
     }
@@ -598,11 +676,322 @@ void tty_cursor_down(void) {
             editor_calculate_screen_pos(editor_cursor_pos, &tty_row, &tty_column);
             set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
         }
+    }
+    // In command mode, up/down is handled by tty_history_up/down
+}
+
+// Add command to history (memory and disk with timestamp)
+static void history_add(const char* cmd) {
+    if (cmd[0] == '\0') return; // Don't add empty commands
+    
+    // Don't add if same as last command
+    if (history_count > 0) {
+        int last_idx = (history_count - 1) % HISTORY_SIZE;
+        int same = 1;
+        for (int i = 0; cmd[i] != '\0' || history[last_idx][i] != '\0'; i++) {
+            if (cmd[i] != history[last_idx][i]) {
+                same = 0;
+                break;
+            }
+        }
+        if (same) return;
+    }
+    
+    // Add to in-memory history (circular buffer)
+    int idx = history_count % HISTORY_SIZE;
+    int i;
+    for (i = 0; i < HISTORY_CMD_SIZE - 1 && cmd[i] != '\0'; i++) {
+        history[idx][i] = cmd[i];
+    }
+    history[idx][i] = '\0';
+    history_count++;
+    
+    // Save to .history file on disk with timestamp
+    // Format: [YYYY-MM-DD HH:MM:SS] command\n
+    rtc_time_t time;
+    rtc_read_local_time(&time);  // Use local time with timezone
+    
+    // Build the history entry
+    char entry[320];
+    int pos = 0;
+    
+    // Add timestamp: [YYYY-MM-DD HH:MM:SS]
+    entry[pos++] = '[';
+    
+    // Year
+    entry[pos++] = '0' + (time.year / 1000) % 10;
+    entry[pos++] = '0' + (time.year / 100) % 10;
+    entry[pos++] = '0' + (time.year / 10) % 10;
+    entry[pos++] = '0' + time.year % 10;
+    entry[pos++] = '-';
+    
+    // Month
+    entry[pos++] = '0' + (time.month / 10) % 10;
+    entry[pos++] = '0' + time.month % 10;
+    entry[pos++] = '-';
+    
+    // Day
+    entry[pos++] = '0' + (time.day / 10) % 10;
+    entry[pos++] = '0' + time.day % 10;
+    entry[pos++] = ' ';
+    
+    // Hours
+    entry[pos++] = '0' + (time.hours / 10) % 10;
+    entry[pos++] = '0' + time.hours % 10;
+    entry[pos++] = ':';
+    
+    // Minutes
+    entry[pos++] = '0' + (time.minutes / 10) % 10;
+    entry[pos++] = '0' + time.minutes % 10;
+    entry[pos++] = ':';
+    
+    // Seconds
+    entry[pos++] = '0' + (time.seconds / 10) % 10;
+    entry[pos++] = '0' + time.seconds % 10;
+    entry[pos++] = ']';
+    entry[pos++] = ' ';
+    
+    // Add the command
+    for (i = 0; cmd[i] != '\0' && pos < 318; i++) {
+        entry[pos++] = cmd[i];
+    }
+    entry[pos++] = '\n';
+    entry[pos] = '\0';
+    
+    // Append to .history file
+    fat32_file_t file;
+    if (fat32_open_file(".history", &file) == 0) {
+        // File exists - append to it
+        // Read existing content
+        uint8_t existing[4096];
+        int existing_len = 0;
+        if (file.file_size < 4096 - 320) {
+            existing_len = fat32_read_file(&file, existing, file.file_size);
+            if (existing_len < 0) existing_len = 0;
+        } else {
+            // File too large, read last part only (keep ~3700 bytes)
+            // Skip to near end
+            int skip = file.file_size - 3700;
+            if (skip < 0) skip = 0;
+            existing_len = fat32_read_file(&file, existing, file.file_size);
+            if (existing_len > 3700) {
+                // Find a newline to start from
+                int start = existing_len - 3700;
+                while (start < existing_len && existing[start] != '\n') start++;
+                if (start < existing_len) start++; // Skip the newline
+                // Shift content
+                int new_len = 0;
+                for (int j = start; j < existing_len; j++) {
+                    existing[new_len++] = existing[j];
+                }
+                existing_len = new_len;
+            }
+        }
+        
+        // Append new entry
+        for (i = 0; entry[i] != '\0' && existing_len < 4095; i++) {
+            existing[existing_len++] = entry[i];
+        }
+        existing[existing_len] = '\0';
+        
+        // Write back
+        fat32_update_file(".history", existing, existing_len);
     } else {
-        // Command mode - TODO: command history
-        if (tty_row < VGA_HEIGHT - 1) {
-            tty_row++;
-            set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+        // File doesn't exist - create it
+        fat32_create_file(".history", (uint8_t*)entry, pos);
+    }
+}
+
+// Helper: Clear current command line on screen
+static void clear_command_line(void) {
+    // Move to prompt position and clear the line
+    tty_row = prompt_row;
+    tty_column = prompt_column;
+    
+    // Clear from prompt to end of line
+    for (size_t x = prompt_column; x < VGA_WIDTH; x++) {
+        const size_t index = tty_row * VGA_WIDTH + x;
+        tty_buffer[index] = vga_entry(' ', tty_color);
+    }
+    set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+}
+
+// Helper: Display a command on the current line
+static void display_command(const char* cmd) {
+    clear_command_line();
+    
+    // Copy to cmd_buffer and display
+    cmd_buffer_pos = 0;
+    for (int i = 0; cmd[i] != '\0' && cmd_buffer_pos < CMD_BUFFER_SIZE - 1; i++) {
+        cmd_buffer[cmd_buffer_pos++] = cmd[i];
+        tty_putchar_internal(cmd[i]);
+    }
+    cmd_cursor_pos = cmd_buffer_pos;
+}
+
+// Navigate to previous command in history (up arrow)
+void tty_history_up(void) {
+    if (history_count == 0) return;
+    
+    // Save current input if we're just starting to navigate
+    if (history_index == -1) {
+        temp_cmd_saved = 1;
+        for (int i = 0; i < cmd_buffer_pos && i < CMD_BUFFER_SIZE - 1; i++) {
+            temp_cmd_buffer[i] = cmd_buffer[i];
+        }
+        temp_cmd_buffer[cmd_buffer_pos] = '\0';
+    }
+    
+    // Calculate the oldest available index
+    int oldest_idx = (history_count > HISTORY_SIZE) ? (history_count - HISTORY_SIZE) : 0;
+    
+    // Move to older command
+    if (history_index == -1) {
+        history_index = history_count - 1;
+    } else if (history_index > oldest_idx) {
+        history_index--;
+    } else {
+        return; // Already at oldest
+    }
+    
+    // Display the command from history
+    int idx = history_index % HISTORY_SIZE;
+    display_command(history[idx]);
+}
+
+// Navigate to next command in history (down arrow)
+void tty_history_down(void) {
+    if (history_index == -1) return; // Not navigating history
+    
+    if (history_index < history_count - 1) {
+        // Move to newer command
+        history_index++;
+        int idx = history_index % HISTORY_SIZE;
+        display_command(history[idx]);
+    } else {
+        // Return to current input
+        history_index = -1;
+        if (temp_cmd_saved) {
+            display_command(temp_cmd_buffer);
+            temp_cmd_saved = 0;
+        } else {
+            clear_command_line();
+            cmd_buffer_pos = 0;
+            cmd_cursor_pos = 0;
+        }
+    }
+}
+
+// Called when command is executed - add to history and reset navigation
+void tty_history_commit(void) {
+    history_add(cmd_buffer);
+    history_index = -1;
+    temp_cmd_saved = 0;
+}
+
+// Signal stop (Ctrl+D)
+void tty_signal_stop(void) {
+    stop_signal = 1;
+    tty_putstr("^D\n");
+    
+    // Clear current command and show new prompt
+    cmd_buffer_pos = 0;
+    cmd_cursor_pos = 0;
+    cmd_buffer[0] = '\0';
+    
+    // Show prompt again
+    char path[64];
+    fat32_get_current_path(path, 64);
+    tty_putstr("DanOS:");
+    tty_putstr(path);
+    tty_putstr("$ ");
+    
+    // Update prompt position
+    prompt_row = tty_row;
+    prompt_column = tty_column;
+}
+
+// Check and clear stop signal
+int tty_check_stop(void) {
+    if (stop_signal) {
+        stop_signal = 0;
+        return 1;
+    }
+    return 0;
+}
+
+// Update prompt position (call this after displaying prompt)
+void tty_set_prompt_position(void) {
+    prompt_row = tty_row;
+    prompt_column = tty_column;
+}
+
+// Print command history from .history file
+void tty_print_history(void) {
+    fat32_file_t file;
+    
+    if (fat32_open_file(".history", &file) != 0) {
+        tty_putstr("No command history found.\n");
+        tty_putstr("(History will be saved to .history file)\n");
+        return;
+    }
+    
+    if (file.file_size == 0) {
+        tty_putstr("History file is empty.\n");
+        return;
+    }
+    
+    // Read the history file
+    uint8_t buffer[4096];
+    uint32_t bytes_to_read = file.file_size > 4095 ? 4095 : file.file_size;
+    int bytes_read = fat32_read_file(&file, buffer, bytes_to_read);
+    
+    if (bytes_read <= 0) {
+        tty_putstr("Error reading history file.\n");
+        return;
+    }
+    
+    buffer[bytes_read] = '\0';
+    
+    tty_putstr("Command History:\n");
+    tty_putstr("----------------\n");
+    
+    // Print line by line with line numbers
+    int line_num = 1;
+    int line_start = 0;
+    
+    for (int i = 0; i <= bytes_read - 1; i++) {
+        if (buffer[i] == '\n' || buffer[i] == '\0') {
+            // Print line number
+            tty_putstr("  ");
+            if (line_num < 10) {
+                tty_putchar_internal(' ');
+            }
+            if (line_num < 100) {
+                tty_putchar_internal(' ');
+            }
+            // Print number
+            if (line_num >= 100) {
+                tty_putchar_internal('0' + (line_num / 100) % 10);
+            }
+            if (line_num >= 10) {
+                tty_putchar_internal('0' + (line_num / 10) % 10);
+            }
+            tty_putchar_internal('0' + line_num % 10);
+            tty_putstr("  ");
+            
+            // Print the line content
+            for (int j = line_start; j < i; j++) {
+                if (buffer[j] >= 32 && buffer[j] < 127) {
+                    tty_putchar_internal(buffer[j]);
+                }
+            }
+            tty_putchar_internal('\n');
+            
+            line_start = i + 1;
+            line_num++;
+            
+            if (buffer[i] == '\0') break;
         }
     }
 }

@@ -72,6 +72,8 @@ void kernel_main(void *multiboot_info) {
     tty_putstr("=================\n\n");
     //fb_function(multiboot_info);
     tty_putstr("DanOS:/$ ");
+    // Set initial prompt position for history navigation
+    tty_set_prompt_position();
     // Initialize interrupts
     idt_init();
     // Initialize keyboard

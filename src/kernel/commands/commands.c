@@ -6,6 +6,7 @@
 #include "fat32.h"
 #include "ata.h"
 #include "rtc.h"
+#include "tty.h"
 
 extern void tty_putchar_internal(char c);
 extern size_t tty_row;
@@ -41,6 +42,7 @@ void tty_process_command(void) {
             tty_putstr("  time     - Display current time and date\n");
             tty_putstr("  timezone - Set timezone (timezone +/-H:M NAME or timezone list)\n");
             tty_putstr("  disk     - Show disk information\n");
+            tty_putstr("  history  - Show command history\n");
             tty_putstr("  reboot   - Reboot the system\n");
             tty_putstr("  shutdown  - Shut down the system\n");
         } else if (strncmp(cmd_buffer, "cls", 3) == 0) {
@@ -590,6 +592,8 @@ void tty_process_command(void) {
             tty_putchar('0' + minutes / 10);
             tty_putchar('0' + minutes % 10);
             tty_putstr(")\n");
+        } else if (strncmp(cmd_buffer, "history", 7) == 0 && (strlength(cmd_buffer) == 7 || cmd_buffer[7] == ' ')) {
+            tty_print_history();
         } else if (strncmp(cmd_buffer, "reboot", 6) == 0 && strlength(cmd_buffer) == 6) {
             tty_putstr("Rebooting system...\n");
             kernel_reboot();
@@ -607,6 +611,9 @@ void tty_process_command(void) {
         }
     }
     
+    // Add command to history before clearing buffer
+    tty_history_commit();
+    
     // Reset command buffer
     cmd_buffer_pos = 0;
     cmd_cursor_pos = 0;
@@ -617,4 +624,7 @@ void tty_process_command(void) {
     tty_putstr("DanOS:");
     tty_putstr(path);
     tty_putstr("$ ");
+    
+    // Update prompt position for history navigation
+    tty_set_prompt_position();
 }
