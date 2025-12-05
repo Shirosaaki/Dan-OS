@@ -27,12 +27,13 @@ void tty_process_command(void) {
             tty_putstr("  clear    - Clear the screen\n");
             tty_putstr("  echo     - Echo back the input\n");
             tty_putstr("  about    - Show OS information\n");
-            tty_putstr("  ls       - List files in current directory\n");
+            tty_putstr("  ls       - List files (hides files starting with .)\n");
+            tty_putstr("  ls -a    - List all files (including hidden)\n");
             tty_putstr("  ls dir   - List files in specified directory\n");
             tty_putstr("  rd       - Display file contents\n");
             tty_putstr("  ct       - Create file (ct filename content)\n");
             tty_putstr("  rm       - Delete file (rm filename or rm *)\n");
-            tty_putstr("  wr       - Text editor (wr filename, Ctrl to save)\n");
+            tty_putstr("  wr       - Text editor (wr filename, Ctrl+S save, Ctrl+E exit)\n");
             tty_putstr("  cp       - Copy file (cp source dest, use . for current dir)\n");
             tty_putstr("  mv       - Move files/dirs (mv source dest, use . for current)\n");
             tty_putstr("  rn       - Rename file (rn oldname newname)\n");
@@ -59,6 +60,28 @@ void tty_process_command(void) {
                 tty_putchar_internal(cmd_buffer[i]);
             }
             tty_putchar_internal('\n');
+        } else if (strncmp(cmd_buffer, "ls -a", 5) == 0) {
+            // ls -a: list all files including hidden
+            if (strlength(cmd_buffer) > 6 && cmd_buffer[5] == ' ') {
+                // ls -a dirname
+                char dirname[32];
+                int j = 0;
+                for (int i = 6; i < strlength(cmd_buffer) && j < 31; i++, j++) {
+                    dirname[j] = cmd_buffer[i];
+                }
+                dirname[j] = '\0';
+                // TODO: implement list_directory_by_name_ex with show_all flag
+                if (fat32_list_directory_by_name(dirname) != 0) {
+                    tty_putstr("Error reading directory\n");
+                }
+            } else {
+                // ls -a: list current directory with hidden files
+                tty_putstr("Directory listing (all files):\n");
+                uint32_t current_cluster = fat32_get_current_directory();
+                if (fat32_list_directory_ex(current_cluster, 1) != 0) {
+                    tty_putstr("Error reading directory\n");
+                }
+            }
         } else if (strncmp(cmd_buffer, "ls", 2) == 0) {
             // List directory - with optional directory name
             if (strlength(cmd_buffer) > 3 && cmd_buffer[2] == ' ') {
@@ -73,7 +96,7 @@ void tty_process_command(void) {
                     tty_putstr("Error reading directory\n");
                 }
             } else {
-                // ls - list current directory
+                // ls - list current directory (hide hidden files)
                 tty_putstr("Directory listing:\n");
                 uint32_t current_cluster = fat32_get_current_directory();
                 if (fat32_list_directory(current_cluster) != 0) {

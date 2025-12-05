@@ -85,11 +85,12 @@ typedef struct {
 int fat32_init(void);
 int fat32_read_boot_sector(void);
 int fat32_list_directory(uint32_t cluster);
+int fat32_list_directory_ex(uint32_t cluster, int show_all);
 int fat32_open_file(const char* filename, fat32_file_t* file);
 int fat32_read_file(fat32_file_t* file, uint8_t* buffer, uint32_t size);
 int fat32_find_file(const char* filename, uint32_t dir_cluster, fat32_dir_entry_t* entry);
 uint32_t fat32_get_next_cluster(uint32_t cluster);
-void fat32_print_file_info(fat32_dir_entry_t* entry);
+void fat32_print_file_info(fat32_dir_entry_t* entry, int show_hidden);
 
 // Write operations
 int fat32_create_file(const char* filename, const uint8_t* data, uint32_t size);

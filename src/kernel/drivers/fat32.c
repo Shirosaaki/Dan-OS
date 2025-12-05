@@ -136,13 +136,28 @@ void fat32_parse_filename(const char* input, char* output) {
         return;
     }
     
-    // Parse regular filename
-    // Parse name part
-    for (i = 0, j = 0; i < 8 && input[j] != '\0' && input[j] != '.'; i++, j++) {
-        if (input[j] >= 'a' && input[j] <= 'z') {
-            output[i] = input[j] - 32; // Convert to uppercase
-        } else {
-            output[i] = input[j];
+    // Handle hidden files (starting with '.' but not "." or "..")
+    j = 0;
+    if (input[0] == '.') {
+        output[0] = '.';
+        j = 1;
+        i = 1;
+        // Parse rest of name part
+        for (; i < 8 && input[j] != '\0' && input[j] != '.'; i++, j++) {
+            if (input[j] >= 'a' && input[j] <= 'z') {
+                output[i] = input[j] - 32; // Convert to uppercase
+            } else {
+                output[i] = input[j];
+            }
+        }
+    } else {
+        // Parse regular filename - name part
+        for (i = 0, j = 0; i < 8 && input[j] != '\0' && input[j] != '.'; i++, j++) {
+            if (input[j] >= 'a' && input[j] <= 'z') {
+                output[i] = input[j] - 32; // Convert to uppercase
+            } else {
+                output[i] = input[j];
+            }
         }
     }
     
@@ -164,7 +179,100 @@ void fat32_parse_filename(const char* input, char* output) {
     }
 }
 
-// Compare FAT filenames
+// Parse filename and return case flags for the reserved byte
+// Returns: bit 3 (0x08) if basename is lowercase, bit 4 (0x10) if extension is lowercase
+uint8_t fat32_parse_filename_with_case(const char* input, char* output) {
+    int i, j;
+    uint8_t case_flags = 0;
+    int name_has_lower = 0, name_has_upper = 0;
+    int ext_has_lower = 0, ext_has_upper = 0;
+    
+    // Initialize output with spaces
+    for (i = 0; i < 11; i++) {
+        output[i] = ' ';
+    }
+    
+    // Handle special directory entries "." and ".."
+    if (input[0] == '.' && input[1] == '\0') {
+        output[0] = '.';
+        return 0;
+    }
+    
+    if (input[0] == '.' && input[1] == '.' && input[2] == '\0') {
+        output[0] = '.';
+        output[1] = '.';
+        return 0;
+    }
+    
+    // Handle hidden files (starting with '.' but not "." or "..")
+    // In this case, we include the '.' as part of the filename
+    j = 0;
+    if (input[0] == '.') {
+        output[0] = '.';
+        j = 1;
+        i = 1;
+        // Parse rest of name part and track case
+        for (; i < 8 && input[j] != '\0' && input[j] != '.'; i++, j++) {
+            if (input[j] >= 'a' && input[j] <= 'z') {
+                output[i] = input[j] - 32; // Convert to uppercase
+                name_has_lower = 1;
+            } else if (input[j] >= 'A' && input[j] <= 'Z') {
+                output[i] = input[j];
+                name_has_upper = 1;
+            } else {
+                output[i] = input[j];
+            }
+        }
+    } else {
+        // Parse name part and track case (normal case)
+        for (i = 0, j = 0; i < 8 && input[j] != '\0' && input[j] != '.'; i++, j++) {
+            if (input[j] >= 'a' && input[j] <= 'z') {
+                output[i] = input[j] - 32; // Convert to uppercase
+                name_has_lower = 1;
+            } else if (input[j] >= 'A' && input[j] <= 'Z') {
+                output[i] = input[j];
+                name_has_upper = 1;
+            } else {
+                output[i] = input[j];
+            }
+        }
+    }
+    
+    // Skip to extension
+    while (input[j] != '\0' && input[j] != '.') {
+        j++;
+    }
+    
+    if (input[j] == '.') {
+        j++;
+        // Parse extension and track case
+        for (i = 8; i < 11 && input[j] != '\0'; i++, j++) {
+            if (input[j] >= 'a' && input[j] <= 'z') {
+                output[i] = input[j] - 32; // Convert to uppercase
+                ext_has_lower = 1;
+            } else if (input[j] >= 'A' && input[j] <= 'Z') {
+                output[i] = input[j];
+                ext_has_upper = 1;
+            } else {
+                output[i] = input[j];
+            }
+        }
+    }
+    
+    // Set case flags (only if all letters are same case)
+    // Bit 3 (0x08): basename is all lowercase
+    // Bit 4 (0x10): extension is all lowercase
+    if (name_has_lower && !name_has_upper) {
+        case_flags |= 0x08;
+    }
+    if (ext_has_lower && !ext_has_upper) {
+        case_flags |= 0x10;
+    }
+    
+    return case_flags;
+}
+
+// Compare FAT filenames (case-insensitive - just compares the 11-byte names)
 int fat32_compare_names(const char* name1, const char* name2) {
     for (int i = 0; i < 11; i++) {
         if (name1[i] != name2[i]) {
@@ -174,17 +282,58 @@ int fat32_compare_names(const char* name1, const char* name2) {
     return 1;
 }
 
+// Compare FAT filenames with case sensitivity using case flags
+// Returns 1 if names match including case, 0 otherwise
+int fat32_compare_names_case_sensitive(const char* fat_name, uint8_t expected_case_flags, 
+                                        const char* entry_name, uint8_t entry_case_flags) {
+    // First check if the base names match (case-insensitive in FAT32 storage)
+    for (int i = 0; i < 11; i++) {
+        if (fat_name[i] != entry_name[i]) {
+            return 0;
+        }
+    }
+    // Names match, now check if case flags match
+    // We only care about bits 3 and 4 (0x08 and 0x10)
+    return (expected_case_flags & 0x18) == (entry_case_flags & 0x18);
+}
+
 // Print file information
-void fat32_print_file_info(fat32_dir_entry_t* entry) {
-    // Print filename
+// show_hidden: if 0, skip files starting with '.'
+void fat32_print_file_info(fat32_dir_entry_t* entry, int show_hidden) {
+    // Check if this is a hidden file (starts with '.')
+    // In FAT32, files starting with '.' have 0x2E as first char
+    int is_hidden = (entry->name[0] == '.');
+    
+    // If not showing hidden and file is hidden, skip
+    if (!show_hidden && is_hidden) {
+        return;
+    }
+    
+    // The reserved byte contains case information:
+    // Bit 3 (0x08): lowercase basename
+    // Bit 4 (0x10): lowercase extension
+    int lowercase_name = (entry->reserved & 0x08);
+    int lowercase_ext = (entry->reserved & 0x10);
+    
+    // Print filename (convert to lowercase based on reserved byte)
     for (int i = 0; i < 8 && entry->name[i] != ' '; i++) {
-        tty_putchar_internal(entry->name[i]);
+        char c = entry->name[i];
+        // Convert to lowercase if flag is set and it's a letter
+        if (lowercase_name && c >= 'A' && c <= 'Z') {
+            c = c + 32;  // Convert to lowercase
+        }
+        tty_putchar_internal(c);
     }
     
     if (entry->name[8] != ' ') {
         tty_putchar_internal('.');
         for (int i = 8; i < 11 && entry->name[i] != ' '; i++) {
-            tty_putchar_internal(entry->name[i]);
+            char c = entry->name[i];
+            // Convert to lowercase if flag is set and it's a letter
+            if (lowercase_ext && c >= 'A' && c <= 'Z') {
+                c = c + 32;  // Convert to lowercase
+            }
+            tty_putchar_internal(c);
         }
     }
     
@@ -196,19 +345,27 @@ void fat32_print_file_info(fat32_dir_entry_t* entry) {
         // Simple size display
         uint32_t size = entry->file_size;
         if (size < 1024) {
-            tty_putstr("bytes");
+            tty_putdec(size);
+            tty_putstr(" B");
         } else if (size < 1024 * 1024) {
-            tty_putstr("KB");
+            tty_putdec(size / 1024);
+            tty_putstr(" KB");
         } else {
-            tty_putstr("MB");
+            tty_putdec(size / (1024 * 1024));
+            tty_putstr(" MB");
         }
     }
     
     tty_putchar_internal('\n');
 }
 
-// List directory contents
+// List directory contents (default: hide hidden files)
 int fat32_list_directory(uint32_t cluster) {
+    return fat32_list_directory_ex(cluster, 0);  // Don't show hidden by default
+}
+
+// List directory contents with option to show all files
+int fat32_list_directory_ex(uint32_t cluster, int show_all) {
     if (cluster == 0) {
         cluster = root_dir_cluster;
     }
@@ -248,8 +405,8 @@ int fat32_list_directory(uint32_t cluster) {
                     continue;
                 }
                 
-                // Print file info
-                fat32_print_file_info(&entries[j]);
+                // Print file info (pass show_all flag)
+                fat32_print_file_info(&entries[j], show_all);
             }
         }
         
@@ -260,10 +417,14 @@ int fat32_list_directory(uint32_t cluster) {
     return 0;
 }
 
-// Find a file in directory
+// Find a file in directory (case-sensitive for regular files)
 int fat32_find_file(const char* filename, uint32_t dir_cluster, fat32_dir_entry_t* entry) {
     char fat_name[11];
-    fat32_parse_filename(filename, fat_name);
+    uint8_t expected_case_flags = fat32_parse_filename_with_case(filename, fat_name);
+    
+    // Special handling for "." and ".." - these are case-insensitive
+    int is_special = (filename[0] == '.' && (filename[1] == '\0' || 
+                     (filename[1] == '.' && filename[2] == '\0')));
     
     if (dir_cluster == 0) {
         dir_cluster = root_dir_cluster;
@@ -294,9 +455,19 @@ int fat32_find_file(const char* filename, uint32_t dir_cluster, fat32_dir_entry_
                     continue;
                 }
                 
-                if (fat32_compare_names((char*)entries[j].name, fat_name)) {
-                    *entry = entries[j];
-                    return 0;  // Found!
+                if (is_special) {
+                    // Case-insensitive match for "." and ".."
+                    if (fat32_compare_names((char*)entries[j].name, fat_name)) {
+                        *entry = entries[j];
+                        return 0;  // Found!
+                    }
+                } else {
+                    // Case-sensitive match for regular files
+                    if (fat32_compare_names_case_sensitive(fat_name, expected_case_flags,
+                            (char*)entries[j].name, entries[j].reserved)) {
+                        *entry = entries[j];
+                        return 0;  // Found!
+                    }
                 }
             }
         }
@@ -540,9 +711,9 @@ int fat32_create_file(const char* filename, const uint8_t* data, uint32_t size) 
     
     // Create directory entry
     fat32_dir_entry_t new_entry;
-    fat32_parse_filename(filename, (char*)new_entry.name);
+    uint8_t case_flags = fat32_parse_filename_with_case(filename, (char*)new_entry.name);
     new_entry.attributes = FAT_ATTR_ARCHIVE;
-    new_entry.reserved = 0;
+    new_entry.reserved = case_flags;  // Store case information
     new_entry.create_time_tenth = 0;
     new_entry.create_time = fat32_get_current_time();
     new_entry.create_date = fat32_get_current_date();
@@ -945,7 +1116,7 @@ int fat32_create_directory(const char* dirname) {
     tty_putstr("\n");
     
     char fat32_name[11];
-    fat32_parse_filename(dirname, fat32_name);
+    uint8_t case_flags = fat32_parse_filename_with_case(dirname, fat32_name);
     
     // Check if directory already exists
     fat32_dir_entry_t existing_entry;
@@ -1033,9 +1204,9 @@ int fat32_create_directory(const char* dirname) {
     
     // Create directory entry in parent directory
     fat32_dir_entry_t new_dir_entry;
-    fat32_parse_filename(dirname, (char*)new_dir_entry.name);
+    for (int i = 0; i < 11; i++) new_dir_entry.name[i] = fat32_name[i];
     new_dir_entry.attributes = FAT_ATTR_DIRECTORY;
-    new_dir_entry.reserved = 0;
+    new_dir_entry.reserved = case_flags;  // Store case information
     new_dir_entry.create_time_tenth = 0;
     new_dir_entry.create_time = fat32_get_current_time();
     new_dir_entry.create_date = fat32_get_current_date();
