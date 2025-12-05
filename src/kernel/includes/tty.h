@@ -39,9 +39,18 @@
 	void tty_signal_stop(void);
 	int tty_check_stop(void);
 	
+	// Copy/paste and selection functions
+	void tty_start_selection(void);
+	void tty_update_selection(void);
+	void tty_cancel_selection(void);
+	void tty_copy(void);
+	void tty_paste(void);
+	int tty_is_selecting(void);
+	
 	// Text editor functions
 	void tty_start_editor_mode(const char* filename);
 	void tty_exit_editor_mode(void);
+	void tty_editor_save(void);
 	int tty_is_editor_mode(void);
 	void tty_editor_add_char(char c);
 	void tty_editor_backspace(void);

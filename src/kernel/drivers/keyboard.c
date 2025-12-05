@@ -147,9 +147,19 @@ void keyboard_handler(void) {
     if (scancode == 0x1D) {
         // Ctrl key pressed
         ctrl_pressed = 1;
-        
-        // Check if in editor mode - if so, exit editor mode
-        #include "tty.h"
+        return;
+    }
+    
+    // Handle Ctrl+S to save in editor mode
+    if (ctrl_pressed && (scancode == 0x1F)) { // 's' key scancode
+        if (tty_is_editor_mode()) {
+            tty_editor_save();
+        }
+        return;
+    }
+    
+    // Handle Ctrl+E to exit editor mode (without saving)
+    if (ctrl_pressed && (scancode == 0x12)) { // 'e' key scancode
         if (tty_is_editor_mode()) {
             tty_exit_editor_mode();
         }
@@ -160,6 +170,28 @@ void keyboard_handler(void) {
     if (ctrl_pressed && (scancode == 0x20)) { // 'd' key scancode
         // Signal to stop current process
         tty_signal_stop();
+        return;
+    }
+    
+    // Handle Ctrl+Space to toggle selection mode
+    if (ctrl_pressed && (scancode == 0x39)) { // Space key scancode
+        if (tty_is_selecting()) {
+            tty_cancel_selection();  // Cancel if already selecting
+        } else {
+            tty_start_selection();   // Start selection
+        }
+        return;
+    }
+    
+    // Handle Ctrl+C to copy
+    if (ctrl_pressed && (scancode == 0x2E)) { // 'c' key scancode
+        tty_copy();
+        return;
+    }
+    
+    // Handle Ctrl+V to paste
+    if (ctrl_pressed && (scancode == 0x2F)) { // 'v' key scancode
+        tty_paste();
         return;
     }
     
