@@ -61,21 +61,75 @@ check_long_mode:
     jmp error                             ; print an error message
 
 setup_page_tables:
+    ; Set up L4 -> L3 mapping
     mov eax, page_table_l3                 ; load the address of the L3 page table into eax
     or eax, 0b11                           ; set the present and read/write flags
     mov [page_table_l4], eax               ; store the address of the L3 page table in the L4 page table
-    mov eax, page_table_l2                 ; load the address of the L2 page table into eax
-    or eax, 0b11                           ; set the present and read/write flags
-    mov [page_table_l3], eax               ; store the address of the L2 page table in the L3 page table
-    mov ecx, 0                           ; clear the ecx register
-.loop:
-    mov eax, 0x200000                      ; load the address of the L1 page table into eax
-    mul ecx                                ; multiply the ecx register by 2 MiB
-    or eax, 0b10000011                     ; set the present, read/write, and user/supervisor flags
-    mov [page_table_l2 + ecx * 8], eax     ; store the address of the L1 page table in the L2 page table
-    inc ecx                                ; set the ecx register to 1
-    cmp ecx, 512                           ; shift the ecx register left by 512 bits
-    jne .loop                              ; loop until the ecx register is equal to 512
+    
+    ; Set up L3 -> L2 mappings for 4GB (4 L2 tables, each covering 1GB)
+    mov eax, page_table_l2_0
+    or eax, 0b11
+    mov [page_table_l3], eax               ; L3[0] -> L2_0 (0-1GB)
+    
+    mov eax, page_table_l2_1
+    or eax, 0b11
+    mov [page_table_l3 + 8], eax           ; L3[1] -> L2_1 (1-2GB)
+    
+    mov eax, page_table_l2_2
+    or eax, 0b11
+    mov [page_table_l3 + 16], eax          ; L3[2] -> L2_2 (2-3GB)
+    
+    mov eax, page_table_l2_3
+    or eax, 0b11
+    mov [page_table_l3 + 24], eax          ; L3[3] -> L2_3 (3-4GB)
+    
+    ; Fill L2_0: maps 0x00000000 - 0x3FFFFFFF (0-1GB)
+    mov ecx, 0
+.loop_l2_0:
+    mov eax, 0x200000
+    mul ecx
+    or eax, 0b10000011                     ; present + read/write + huge page
+    mov [page_table_l2_0 + ecx * 8], eax
+    inc ecx
+    cmp ecx, 512
+    jne .loop_l2_0
+    
+    ; Fill L2_1: maps 0x40000000 - 0x7FFFFFFF (1-2GB)
+    mov ecx, 0
+.loop_l2_1:
+    mov eax, 0x200000
+    mul ecx
+    add eax, 0x40000000                    ; offset by 1GB
+    or eax, 0b10000011
+    mov [page_table_l2_1 + ecx * 8], eax
+    inc ecx
+    cmp ecx, 512
+    jne .loop_l2_1
+    
+    ; Fill L2_2: maps 0x80000000 - 0xBFFFFFFF (2-3GB)
+    mov ecx, 0
+.loop_l2_2:
+    mov eax, 0x200000
+    mul ecx
+    add eax, 0x80000000                    ; offset by 2GB
+    or eax, 0b10000011
+    mov [page_table_l2_2 + ecx * 8], eax
+    inc ecx
+    cmp ecx, 512
+    jne .loop_l2_2
+    
+    ; Fill L2_3: maps 0xC0000000 - 0xFFFFFFFF (3-4GB)
+    mov ecx, 0
+.loop_l2_3:
+    mov eax, 0x200000
+    mul ecx
+    add eax, 0xC0000000                    ; offset by 3GB
+    or eax, 0b10000011
+    mov [page_table_l2_3 + ecx * 8], eax
+    inc ecx
+    cmp ecx, 512
+    jne .loop_l2_3
+    
     ret
 
 enable_paging:
@@ -104,13 +158,19 @@ error:
 section .bss
 align 4096
 page_table_l4:
-    resb 4096                           ; 4 KiB page table
+    resb 4096                           ; 4 KiB page table (L4)
 page_table_l3:
-    resb 4096                           ; 4 KiB page table
-page_table_l2:
-    resb 4096                           ; 4 KiB page table
+    resb 4096                           ; 4 KiB page table (L3)
+page_table_l2_0:
+    resb 4096                           ; L2 table for 0-1GB
+page_table_l2_1:
+    resb 4096                           ; L2 table for 1-2GB
+page_table_l2_2:
+    resb 4096                           ; L2 table for 2-3GB
+page_table_l2_3:
+    resb 4096                           ; L2 table for 3-4GB
 stack_bottom:
-    resb 4096 * 4                       ; 4 MiB stack
+    resb 4096 * 4                       ; 16 KiB stack
 stack_top:
 
 ; Storage for multiboot info pointer (32-bit value)

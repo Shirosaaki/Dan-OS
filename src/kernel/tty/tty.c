@@ -9,6 +9,7 @@
 #include "../../cpu/ports.h"
 #include "fat32.h"
 #include "rtc.h"
+#include "framebuffer.h"
 
 // Make these non-static so they can be accessed from commands.c
 size_t tty_row;
@@ -16,6 +17,34 @@ size_t tty_column;
 uint8_t tty_color;
 static uint16_t* tty_buffer;
 static uint16_t* const VGA_MEMORY = VGA_BUFFER;
+
+// Dynamic screen dimensions (VGA or framebuffer based)
+static size_t screen_width = VGA_WIDTH;
+static size_t screen_height = VGA_HEIGHT;
+
+// Helper: Convert VGA color to 32-bit RGB for framebuffer
+static uint32_t vga_to_rgb(uint8_t vga_color) {
+    // Map VGA 4-bit colors to 32-bit RGB
+    static const uint32_t vga_palette[16] = {
+        0x00000000,  // 0: Black
+        0x000000AA,  // 1: Blue
+        0x0000AA00,  // 2: Green
+        0x0000AAAA,  // 3: Cyan
+        0x00AA0000,  // 4: Red
+        0x00AA00AA,  // 5: Magenta
+        0x00AA5500,  // 6: Brown
+        0x00AAAAAA,  // 7: Light Grey
+        0x00555555,  // 8: Dark Grey
+        0x005555FF,  // 9: Light Blue
+        0x0055FF55,  // 10: Light Green
+        0x0055FFFF,  // 11: Light Cyan
+        0x00FF5555,  // 12: Light Red
+        0x00FF55FF,  // 13: Pink
+        0x00FFFF55,  // 14: Yellow
+        0x00FFFFFF   // 15: White
+    };
+    return vga_palette[vga_color & 0x0F];
+}
 
 // Command buffer
 #define CMD_BUFFER_SIZE 256
@@ -67,46 +96,72 @@ void tty_init(void) {
     tty_row = 0;
     tty_column = 0;
     tty_color = vga_entry_color(PRINT_COLOR_YELLOW, PRINT_COLOR_BLACK);
-    tty_buffer = VGA_MEMORY;
-    for (size_t y = 0; y < VGA_HEIGHT; y++) {
-        for (size_t x = 0; x < VGA_WIDTH; x++) {
-            const size_t index = y * VGA_WIDTH + x;
-            tty_buffer[index] = vga_entry(' ', tty_color);
+    
+    // Check if framebuffer is available AND properly initialized
+    if (fb_is_available() && terminal_get_cols() > 0 && terminal_get_rows() > 0) {
+        // Use framebuffer dimensions
+        screen_width = terminal_get_cols();
+        screen_height = terminal_get_rows();
+        // Set matching colors in terminal
+        terminal_set_colors(vga_to_rgb(tty_color & 0x0F), 
+                           vga_to_rgb((tty_color >> 4) & 0x0F));
+    } else {
+        // Use VGA text mode (default fallback)
+        screen_width = VGA_WIDTH;
+        screen_height = VGA_HEIGHT;
+        tty_buffer = VGA_MEMORY;
+        for (size_t y = 0; y < screen_height; y++) {
+            for (size_t x = 0; x < screen_width; x++) {
+                const size_t index = y * screen_width + x;
+                tty_buffer[index] = vga_entry(' ', tty_color);
+            }
         }
     }
 }
 
 void tty_clear(void) {
-    for (size_t y = 0; y < VGA_HEIGHT; y++) {
-        for (size_t x = 0; x < VGA_WIDTH; x++) {
-            const size_t index = y * VGA_WIDTH + x;
-            tty_buffer[index] = vga_entry(' ', tty_color);
+    if (fb_is_available()) {
+        terminal_clear();
+    } else {
+        for (size_t y = 0; y < screen_height; y++) {
+            for (size_t x = 0; x < screen_width; x++) {
+                const size_t index = y * screen_width + x;
+                tty_buffer[index] = vga_entry(' ', tty_color);
+            }
         }
+        set_cursor_offset(0);
     }
     tty_row = 0;
     tty_column = 0;
-    set_cursor_offset(0);
 }
 
 void tty_setcolor(uint8_t color) {
     tty_color = color;
+    if (fb_is_available()) {
+        terminal_set_colors(vga_to_rgb(color & 0x0F), 
+                           vga_to_rgb((color >> 4) & 0x0F));
+    }
 }
 
 // Scroll the screen up by one line
 static void tty_scroll(void) {
-    // Move all lines up by one
-    for (size_t y = 0; y < VGA_HEIGHT - 1; y++) {
-        for (size_t x = 0; x < VGA_WIDTH; x++) {
-            const size_t dst_index = y * VGA_WIDTH + x;
-            const size_t src_index = (y + 1) * VGA_WIDTH + x;
-            tty_buffer[dst_index] = tty_buffer[src_index];
+    if (fb_is_available()) {
+        terminal_scroll();
+    } else {
+        // Move all lines up by one (VGA mode)
+        for (size_t y = 0; y < screen_height - 1; y++) {
+            for (size_t x = 0; x < screen_width; x++) {
+                const size_t dst_index = y * screen_width + x;
+                const size_t src_index = (y + 1) * screen_width + x;
+                tty_buffer[dst_index] = tty_buffer[src_index];
+            }
         }
-    }
-    
-    // Clear the last line
-    for (size_t x = 0; x < VGA_WIDTH; x++) {
-        const size_t index = (VGA_HEIGHT - 1) * VGA_WIDTH + x;
-        tty_buffer[index] = vga_entry(' ', tty_color);
+        
+        // Clear the last line
+        for (size_t x = 0; x < screen_width; x++) {
+            const size_t index = (screen_height - 1) * screen_width + x;
+            tty_buffer[index] = vga_entry(' ', tty_color);
+        }
     }
 }
 
@@ -114,14 +169,21 @@ void tty_putchar_at(unsigned char c, uint8_t color, size_t x, size_t y) {
     if (c == '\n') {
         tty_column = 0;
         tty_row++;
-        set_cursor_offset((tty_row * VGA_WIDTH + tty_column));
+        set_cursor_offset((tty_row * screen_width + tty_column));
         return;
     }
-    const size_t index = y * VGA_WIDTH + x;
-    tty_buffer[index] = vga_entry(c, color);
+    
+    if (fb_is_available()) {
+        terminal_draw_char_at(c, x, y, 
+                              vga_to_rgb(color & 0x0F),
+                              vga_to_rgb((color >> 4) & 0x0F));
+    } else {
+        const size_t index = y * screen_width + x;
+        tty_buffer[index] = vga_entry(c, color);
+    }
     tty_column = x + 1;
     tty_row = y;
-    set_cursor_offset((tty_row * VGA_WIDTH + tty_column));
+    set_cursor_offset((tty_row * screen_width + tty_column));
 }
 
 // Internal version for printing that doesn't add to command buffer
@@ -129,25 +191,25 @@ void tty_putchar_internal(char c) {
     if (c == '\n') {
         tty_column = 0;
         tty_row++;
-        if (tty_row >= VGA_HEIGHT) {
+        if (tty_row >= screen_height) {
             tty_scroll();
-            tty_row = VGA_HEIGHT - 1;
+            tty_row = screen_height - 1;
         }
-        set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+        set_cursor_offset(tty_row * screen_width + tty_column);
         return;
     }
     
     unsigned char uc = c;
     tty_putchar_at(uc, tty_color, tty_column, tty_row);
     
-    if (tty_column >= VGA_WIDTH) {
+    if (tty_column >= screen_width) {
         tty_column = 0;
         tty_row++;
-        if (tty_row >= VGA_HEIGHT) {
+        if (tty_row >= screen_height) {
             tty_scroll();
-            tty_row = VGA_HEIGHT - 1;
+            tty_row = screen_height - 1;
         }
-        set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+        set_cursor_offset(tty_row * screen_width + tty_column);
     }
 }
 
@@ -171,10 +233,16 @@ void tty_putchar(char c) {
             
             // Draw the inserted char and all following chars
             for (int i = cmd_cursor_pos - 1; i < cmd_buffer_pos; i++) {
-                const size_t index = tty_row * VGA_WIDTH + tty_column;
-                tty_buffer[index] = vga_entry(cmd_buffer[i], tty_color);
+                if (fb_is_available()) {
+                    terminal_draw_char_at(cmd_buffer[i], tty_column, tty_row,
+                                          vga_to_rgb(tty_color & 0x0F),
+                                          vga_to_rgb((tty_color >> 4) & 0x0F));
+                } else {
+                    const size_t index = tty_row * screen_width + tty_column;
+                    tty_buffer[index] = vga_entry(cmd_buffer[i], tty_color);
+                }
                 tty_column++;
-                if (tty_column >= VGA_WIDTH) {
+                if (tty_column >= screen_width) {
                     tty_column = 0;
                     tty_row++;
                 }
@@ -183,11 +251,11 @@ void tty_putchar(char c) {
             // Move cursor to correct position (after inserted char)
             tty_row = saved_row;
             tty_column = saved_col + 1;
-            if (tty_column >= VGA_WIDTH) {
+            if (tty_column >= screen_width) {
                 tty_column = 0;
                 tty_row++;
             }
-            set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+            set_cursor_offset(tty_row * screen_width + tty_column);
         } else {
             // At end of buffer: just append normally
             cmd_buffer[cmd_buffer_pos++] = c;
@@ -269,13 +337,24 @@ void tty_puthex64(uint64_t v) {
 
 void tty_middle_screen(const char* data) {
     size_t len = strlength(data);
-    size_t x = (VGA_WIDTH - len) / 2;
-    size_t y = VGA_HEIGHT / 2;
+    size_t x = (screen_width - len) / 2;
+    size_t y = screen_height / 2;
     for (int i = 0; i < len; i++)
         tty_putchar_at(data[i], tty_color, x + i, y);
 }
 
 void set_cursor_offset(size_t offset) {
+    if (fb_is_available()) {
+        // In framebuffer mode, we draw a software cursor
+        // The terminal module handles cursor drawing
+        // Just update cursor position in terminal
+        size_t col = offset % screen_width;
+        size_t row = offset / screen_width;
+        terminal_set_cursor(col, row);
+        return;
+    }
+    
+    // VGA hardware cursor (only works in text mode)
     // Send the high byte of the offset
     outb(0x3D4, 14);                   // Command port for high byte
     outb(0x3D5, (uint8_t)(offset >> 8)); // Send high byte
@@ -295,13 +374,19 @@ void tty_backspace(void) {
             tty_column--;
         } else if (tty_row > 0) {
             tty_row--;
-            tty_column = VGA_WIDTH - 1;
+            tty_column = screen_width - 1;
         }
         
         // Clear the character
-        const size_t index = tty_row * VGA_WIDTH + tty_column;
-        tty_buffer[index] = vga_entry(' ', tty_color);
-        set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+        if (fb_is_available()) {
+            terminal_draw_char_at(' ', tty_column, tty_row,
+                                  vga_to_rgb(tty_color & 0x0F),
+                                  vga_to_rgb((tty_color >> 4) & 0x0F));
+        } else {
+            const size_t index = tty_row * screen_width + tty_column;
+            tty_buffer[index] = vga_entry(' ', tty_color);
+        }
+        set_cursor_offset(tty_row * screen_width + tty_column);
     } else {
         // Normal command mode with cursor support
         if (cmd_cursor_pos > 0) {
@@ -319,7 +404,7 @@ void tty_backspace(void) {
                 tty_column--;
             } else if (tty_row > 0) {
                 tty_row--;
-                tty_column = VGA_WIDTH - 1;
+                tty_column = screen_width - 1;
             }
             
             // Redraw from cursor position to end of command
@@ -328,23 +413,35 @@ void tty_backspace(void) {
             
             // Redraw remaining characters
             for (int i = cmd_cursor_pos; i < cmd_buffer_pos; i++) {
-                const size_t index = tty_row * VGA_WIDTH + tty_column;
-                tty_buffer[index] = vga_entry(cmd_buffer[i], tty_color);
+                if (fb_is_available()) {
+                    terminal_draw_char_at(cmd_buffer[i], tty_column, tty_row,
+                                          vga_to_rgb(tty_color & 0x0F),
+                                          vga_to_rgb((tty_color >> 4) & 0x0F));
+                } else {
+                    const size_t index = tty_row * screen_width + tty_column;
+                    tty_buffer[index] = vga_entry(cmd_buffer[i], tty_color);
+                }
                 tty_column++;
-                if (tty_column >= VGA_WIDTH) {
+                if (tty_column >= screen_width) {
                     tty_column = 0;
                     tty_row++;
                 }
             }
             
             // Clear the last character position (which is now empty)
-            const size_t index = tty_row * VGA_WIDTH + tty_column;
-            tty_buffer[index] = vga_entry(' ', tty_color);
+            if (fb_is_available()) {
+                terminal_draw_char_at(' ', tty_column, tty_row,
+                                      vga_to_rgb(tty_color & 0x0F),
+                                      vga_to_rgb((tty_color >> 4) & 0x0F));
+            } else {
+                const size_t index = tty_row * screen_width + tty_column;
+                tty_buffer[index] = vga_entry(' ', tty_color);
+            }
             
             // Restore cursor position
             tty_row = saved_row;
             tty_column = saved_col;
-            set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+            set_cursor_offset(tty_row * screen_width + tty_column);
         }
     }
 }
@@ -360,7 +457,7 @@ static void editor_calculate_screen_pos(int buffer_pos, size_t* out_row, size_t*
             *out_col = 0;
         } else {
             (*out_col)++;
-            if (*out_col >= VGA_WIDTH) {
+            if (*out_col >= screen_width) {
                 (*out_row)++;
                 *out_col = 0;
             }
@@ -371,10 +468,16 @@ static void editor_calculate_screen_pos(int buffer_pos, size_t* out_row, size_t*
 // Helper: Redraw all editor content with selection highlighting
 static void editor_full_redraw(void) {
     // Clear screen from editor start
-    for (size_t y = editor_content_start_row; y < VGA_HEIGHT; y++) {
-        for (size_t x = (y == editor_content_start_row ? editor_content_start_col : 0); x < VGA_WIDTH; x++) {
-            const size_t index = y * VGA_WIDTH + x;
-            tty_buffer[index] = vga_entry(' ', tty_color);
+    for (size_t y = editor_content_start_row; y < screen_height; y++) {
+        for (size_t x = (y == editor_content_start_row ? editor_content_start_col : 0); x < screen_width; x++) {
+            if (fb_is_available()) {
+                terminal_draw_char_at(' ', x, y,
+                                      vga_to_rgb(tty_color & 0x0F),
+                                      vga_to_rgb((tty_color >> 4) & 0x0F));
+            } else {
+                const size_t index = y * screen_width + x;
+                tty_buffer[index] = vga_entry(' ', tty_color);
+            }
         }
     }
     
@@ -402,10 +505,16 @@ static void editor_full_redraw(void) {
             }
             
             // Put character
-            const size_t index = tty_row * VGA_WIDTH + tty_column;
-            tty_buffer[index] = vga_entry(editor_buffer[i], color);
+            if (fb_is_available()) {
+                terminal_draw_char_at(editor_buffer[i], tty_column, tty_row,
+                                      vga_to_rgb(color & 0x0F),
+                                      vga_to_rgb((color >> 4) & 0x0F));
+            } else {
+                const size_t index = tty_row * screen_width + tty_column;
+                tty_buffer[index] = vga_entry(editor_buffer[i], color);
+            }
             tty_column++;
-            if (tty_column >= VGA_WIDTH) {
+            if (tty_column >= screen_width) {
                 tty_column = 0;
                 tty_row++;
             }
@@ -414,7 +523,7 @@ static void editor_full_redraw(void) {
     
     // Position cursor at editor_cursor_pos
     editor_calculate_screen_pos(editor_cursor_pos, &tty_row, &tty_column);
-    set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+    set_cursor_offset(tty_row * screen_width + tty_column);
 }
 
 // Start editor mode
@@ -518,9 +627,15 @@ void tty_editor_save(void) {
     tty_column = 0;
     
     // Clear the status line
-    for (size_t x = 0; x < VGA_WIDTH; x++) {
-        const size_t index = tty_row * VGA_WIDTH + x;
-        tty_buffer[index] = vga_entry(' ', tty_color);
+    for (size_t x = 0; x < screen_width; x++) {
+        if (fb_is_available()) {
+            terminal_draw_char_at(' ', x, tty_row,
+                                  vga_to_rgb(tty_color & 0x0F),
+                                  vga_to_rgb((tty_color >> 4) & 0x0F));
+        } else {
+            const size_t index = tty_row * screen_width + x;
+            tty_buffer[index] = vga_entry(' ', tty_color);
+        }
     }
     
     if (result == 0) {
@@ -532,7 +647,7 @@ void tty_editor_save(void) {
     // Restore cursor position
     tty_row = saved_row;
     tty_column = saved_col;
-    set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+    set_cursor_offset(tty_row * screen_width + tty_column);
 }
 
 // Check if in editor mode
@@ -594,7 +709,7 @@ void tty_cursor_left(void) {
             editor_cursor_pos--;
             // Update screen cursor
             editor_calculate_screen_pos(editor_cursor_pos, &tty_row, &tty_column);
-            set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+            set_cursor_offset(tty_row * screen_width + tty_column);
             
             // Update selection if active
             if (selection_active) {
@@ -609,9 +724,9 @@ void tty_cursor_left(void) {
                 tty_column--;
             } else if (tty_row > prompt_row) {
                 tty_row--;
-                tty_column = VGA_WIDTH - 1;
+                tty_column = screen_width - 1;
             }
-            set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+            set_cursor_offset(tty_row * screen_width + tty_column);
             
             // Update selection if active
             if (selection_active) {
@@ -628,7 +743,7 @@ void tty_cursor_right(void) {
             editor_cursor_pos++;
             // Update screen cursor
             editor_calculate_screen_pos(editor_cursor_pos, &tty_row, &tty_column);
-            set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+            set_cursor_offset(tty_row * screen_width + tty_column);
             
             // Update selection if active
             if (selection_active) {
@@ -640,11 +755,11 @@ void tty_cursor_right(void) {
         if (cmd_cursor_pos < cmd_buffer_pos) {
             cmd_cursor_pos++;
             tty_column++;
-            if (tty_column >= VGA_WIDTH) {
+            if (tty_column >= screen_width) {
                 tty_column = 0;
                 tty_row++;
             }
-            set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+            set_cursor_offset(tty_row * screen_width + tty_column);
             
             // Update selection if active
             if (selection_active) {
@@ -685,7 +800,7 @@ void tty_cursor_up(void) {
             
             // Update screen cursor
             editor_calculate_screen_pos(editor_cursor_pos, &tty_row, &tty_column);
-            set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+            set_cursor_offset(tty_row * screen_width + tty_column);
             
             // Update selection if active
             if (selection_active) {
@@ -696,7 +811,7 @@ void tty_cursor_up(void) {
         // Command mode - TODO: command history
         if (tty_row > 0) {
             tty_row--;
-            set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+            set_cursor_offset(tty_row * screen_width + tty_column);
         }
     }
 }
@@ -739,7 +854,7 @@ void tty_cursor_down(void) {
             
             // Update screen cursor
             editor_calculate_screen_pos(editor_cursor_pos, &tty_row, &tty_column);
-            set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+            set_cursor_offset(tty_row * screen_width + tty_column);
             
             // Update selection if active
             if (selection_active) {
@@ -879,11 +994,17 @@ static void clear_command_line(void) {
     tty_column = prompt_column;
     
     // Clear from prompt to end of line
-    for (size_t x = prompt_column; x < VGA_WIDTH; x++) {
-        const size_t index = tty_row * VGA_WIDTH + x;
-        tty_buffer[index] = vga_entry(' ', tty_color);
+    for (size_t x = prompt_column; x < screen_width; x++) {
+        if (fb_is_available()) {
+            terminal_draw_char_at(' ', x, tty_row,
+                                  vga_to_rgb(tty_color & 0x0F),
+                                  vga_to_rgb((tty_color >> 4) & 0x0F));
+        } else {
+            const size_t index = tty_row * screen_width + x;
+            tty_buffer[index] = vga_entry(' ', tty_color);
+        }
     }
-    set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+    set_cursor_offset(tty_row * screen_width + tty_column);
 }
 
 // Helper: Display a command on the current line
@@ -1085,10 +1206,16 @@ static void redraw_cmd_with_selection(void) {
             color = tty_color;
         }
         
-        const size_t index = tty_row * VGA_WIDTH + tty_column;
-        tty_buffer[index] = vga_entry(cmd_buffer[i], color);
+        if (fb_is_available()) {
+            terminal_draw_char_at(cmd_buffer[i], tty_column, tty_row,
+                                  vga_to_rgb(color & 0x0F),
+                                  vga_to_rgb((color >> 4) & 0x0F));
+        } else {
+            const size_t index = tty_row * screen_width + tty_column;
+            tty_buffer[index] = vga_entry(cmd_buffer[i], color);
+        }
         tty_column++;
-        if (tty_column >= VGA_WIDTH) {
+        if (tty_column >= screen_width) {
             tty_column = 0;
             tty_row++;
         }
@@ -1097,11 +1224,11 @@ static void redraw_cmd_with_selection(void) {
     // Calculate cursor screen position
     tty_row = prompt_row;
     tty_column = prompt_column + cmd_cursor_pos;
-    while (tty_column >= VGA_WIDTH) {
-        tty_column -= VGA_WIDTH;
+    while (tty_column >= screen_width) {
+        tty_column -= screen_width;
         tty_row++;
     }
-    set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+    set_cursor_offset(tty_row * screen_width + tty_column);
 }
 
 // Start selection mode (Ctrl+Space)
@@ -1148,10 +1275,16 @@ void tty_cancel_selection(void) {
         tty_column = prompt_column;
         
         for (int i = 0; i < cmd_buffer_pos; i++) {
-            const size_t index = tty_row * VGA_WIDTH + tty_column;
-            tty_buffer[index] = vga_entry(cmd_buffer[i], tty_color);
+            if (fb_is_available()) {
+                terminal_draw_char_at(cmd_buffer[i], tty_column, tty_row,
+                                      vga_to_rgb(tty_color & 0x0F),
+                                      vga_to_rgb((tty_color >> 4) & 0x0F));
+            } else {
+                const size_t index = tty_row * screen_width + tty_column;
+                tty_buffer[index] = vga_entry(cmd_buffer[i], tty_color);
+            }
             tty_column++;
-            if (tty_column >= VGA_WIDTH) {
+            if (tty_column >= screen_width) {
                 tty_column = 0;
                 tty_row++;
             }
@@ -1160,11 +1293,11 @@ void tty_cancel_selection(void) {
         // Restore cursor position
         tty_row = prompt_row;
         tty_column = prompt_column + cmd_cursor_pos;
-        while (tty_column >= VGA_WIDTH) {
-            tty_column -= VGA_WIDTH;
+        while (tty_column >= screen_width) {
+            tty_column -= screen_width;
             tty_row++;
         }
-        set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+        set_cursor_offset(tty_row * screen_width + tty_column);
     }
 }
 
@@ -1239,27 +1372,39 @@ void tty_paste(void) {
         tty_column = prompt_column;
         
         for (int i = 0; i < cmd_buffer_pos; i++) {
-            const size_t index = tty_row * VGA_WIDTH + tty_column;
-            tty_buffer[index] = vga_entry(cmd_buffer[i], tty_color);
+            if (fb_is_available()) {
+                terminal_draw_char_at(cmd_buffer[i], tty_column, tty_row,
+                                      vga_to_rgb(tty_color & 0x0F),
+                                      vga_to_rgb((tty_color >> 4) & 0x0F));
+            } else {
+                const size_t index = tty_row * screen_width + tty_column;
+                tty_buffer[index] = vga_entry(cmd_buffer[i], tty_color);
+            }
             tty_column++;
-            if (tty_column >= VGA_WIDTH) {
+            if (tty_column >= screen_width) {
                 tty_column = 0;
                 tty_row++;
             }
         }
         
         // Clear any leftover characters
-        const size_t index = tty_row * VGA_WIDTH + tty_column;
-        tty_buffer[index] = vga_entry(' ', tty_color);
+        if (fb_is_available()) {
+            terminal_draw_char_at(' ', tty_column, tty_row,
+                                  vga_to_rgb(tty_color & 0x0F),
+                                  vga_to_rgb((tty_color >> 4) & 0x0F));
+        } else {
+            const size_t index = tty_row * screen_width + tty_column;
+            tty_buffer[index] = vga_entry(' ', tty_color);
+        }
         
         // Position cursor
         tty_row = prompt_row;
         tty_column = prompt_column + cmd_cursor_pos;
-        while (tty_column >= VGA_WIDTH) {
-            tty_column -= VGA_WIDTH;
+        while (tty_column >= screen_width) {
+            tty_column -= screen_width;
             tty_row++;
         }
-        set_cursor_offset(tty_row * VGA_WIDTH + tty_column);
+        set_cursor_offset(tty_row * screen_width + tty_column);
     }
 }
 

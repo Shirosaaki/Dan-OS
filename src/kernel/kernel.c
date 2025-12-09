@@ -14,14 +14,39 @@
 #include "vmm.h"
 #include "scheduler.h"
 #include "syscall.h"
+#include "framebuffer.h"
 
 void kernel_main(void *multiboot_info) {
-    // Initialize terminal
+    // Try to initialize framebuffer from Multiboot2 info
+    // The bootloader now maps 4GB of memory, so framebuffer should be accessible
+    int fb_ok = fb_init_from_multiboot2(multiboot_info);
+    
+    if (fb_ok == 0 && fb_is_available()) {
+        // Framebuffer available - initialize terminal with it
+        terminal_init();
+    }
+    
+    // Initialize TTY (will use framebuffer if available, else VGA fallback)
     tty_init();
     
     tty_putstr("Welcome to DanOS!\n");
     tty_putstr("=================\n\n");
-    tty_putstr("DanOS:/$ ");
+    
+    // Display mode info
+    if (fb_is_available()) {
+        const framebuffer_info_t* fb = fb_get_info();
+        tty_putstr("Framebuffer: ");
+        tty_putdec(fb->width);
+        tty_putstr("x");
+        tty_putdec(fb->height);
+        tty_putstr("x");
+        tty_putdec(fb->bpp);
+        tty_putstr("bpp\n");
+    } else {
+        tty_putstr("Using VGA text mode\n");
+    }
+    
+    tty_putstr("\nDanOS:/$ ");
     // Set initial prompt position for history navigation
     tty_set_prompt_position();
     // Initialize interrupts
