@@ -5,7 +5,6 @@
 #include "idt.h"
 #include "tty.h"
 #include "../cpu/ports.h"
-#include "mouse.h"
 
 // IDT entries and pointer
 static idt_entry_t idt[IDT_ENTRIES];
@@ -163,10 +162,6 @@ void irq_handler(uint64_t irq_no) {
     if (irq_no == 33) {
         // IRQ1 - Keyboard
         keyboard_handler();
-    }
-    if (irq_no == 44) {
-        // IRQ12 - PS/2 mouse
-        mouse_handler();
     }
     
     // Send End of Interrupt (EOI) to PIC

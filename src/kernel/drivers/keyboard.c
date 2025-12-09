@@ -5,9 +5,6 @@
 #include "keyboard.h"
 #include "tty.h"
 #include "../../cpu/ports.h"
-// framebuffer control
-extern void fb_set_visible(int v);
-extern int fb_is_visible(void);
 
 // Scancode to ASCII table (US QWERTY layout)
 static const char scancode_to_ascii[] = {
@@ -198,21 +195,6 @@ void keyboard_handler(void) {
     if (scancode == 0x3A) {
         // Caps lock toggle
         caps_lock = !caps_lock;
-        return;
-    }
-
-    if (scancode == 0x3B) {
-        // F1 pressed - toggle between framebuffer and VGA tty
-        if (fb_is_visible()) {
-            // hide framebuffer and switch to tty
-            fb_set_visible(0);
-            // ensure tty is visible and cleared
-            tty_clear();
-            tty_putstr("DanOS:/$ ");
-        } else {
-            // show framebuffer
-            fb_set_visible(1);
-        }
         return;
     }
     
