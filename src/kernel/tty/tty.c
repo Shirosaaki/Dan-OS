@@ -346,11 +346,16 @@ void tty_middle_screen(const char* data) {
 void set_cursor_offset(size_t offset) {
     if (fb_is_available()) {
         // In framebuffer mode, we draw a software cursor
-        // The terminal module handles cursor drawing
-        // Just update cursor position in terminal
+        // First hide the old cursor
+        terminal_hide_cursor();
+        
+        // Update cursor position in terminal
         size_t col = offset % screen_width;
         size_t row = offset / screen_width;
         terminal_set_cursor(col, row);
+        
+        // Draw the new cursor
+        terminal_draw_cursor();
         return;
     }
     

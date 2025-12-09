@@ -376,15 +376,21 @@ size_t terminal_get_rows(void) {
 
 // Cursor state for blinking
 static int cursor_visible = 0;
+static size_t cursor_last_x = 0;
+static size_t cursor_last_y = 0;
 
 void terminal_draw_cursor(void) {
     if (!fb_available) return;
     
-    // Draw an underline cursor at current position
+    // Save cursor position for hiding later
+    cursor_last_x = term_state.cursor_x;
+    cursor_last_y = term_state.cursor_y;
+    
+    // Draw an underline cursor at the bottom of the character cell
     uint32_t px = term_state.cursor_x * FONT_WIDTH;
     uint32_t py = term_state.cursor_y * FONT_HEIGHT + FONT_HEIGHT - 2;
     
-    // Draw cursor as a small rectangle (underline style)
+    // Draw cursor as a 2-pixel tall underline
     fb_fill_rect(px, py, FONT_WIDTH, 2, term_state.fg_color);
     cursor_visible = 1;
 }
@@ -392,10 +398,11 @@ void terminal_draw_cursor(void) {
 void terminal_hide_cursor(void) {
     if (!fb_available || !cursor_visible) return;
     
-    // Erase cursor by drawing background color
-    uint32_t px = term_state.cursor_x * FONT_WIDTH;
-    uint32_t py = term_state.cursor_y * FONT_HEIGHT + FONT_HEIGHT - 2;
+    // Erase cursor by redrawing background at old cursor underline position
+    uint32_t px = cursor_last_x * FONT_WIDTH;
+    uint32_t py = cursor_last_y * FONT_HEIGHT + FONT_HEIGHT - 2;
     
+    // Clear the cursor underline with background color
     fb_fill_rect(px, py, FONT_WIDTH, 2, term_state.bg_color);
     cursor_visible = 0;
 }
