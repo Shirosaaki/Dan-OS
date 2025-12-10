@@ -15,6 +15,8 @@
 #include "scheduler.h"
 #include "syscall.h"
 #include "framebuffer.h"
+#include "net.h"
+#include "e1000.h"
 
 void kernel_main(void *multiboot_info) {
     // Try to initialize framebuffer from Multiboot2 info
@@ -75,6 +77,12 @@ void kernel_main(void *multiboot_info) {
     }
     // Initialize timezone system (requires filesystem)
     timezone_init();
+    // Initialize network stack
+    net_init();
+    // Initialize E1000 network card
+    if (e1000_init() != 0) {
+        tty_putstr("Warning: No network card detected.\n");
+    }
     while (1) {
         __asm__ volatile("hlt"); // Halt until next interrupt
     }

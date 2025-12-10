@@ -169,7 +169,7 @@ void tty_putchar_at(unsigned char c, uint8_t color, size_t x, size_t y) {
     if (c == '\n') {
         tty_column = 0;
         tty_row++;
-        set_cursor_offset((tty_row * screen_width + tty_column));
+        // Don't draw cursor here - caller will handle it
         return;
     }
     
@@ -183,7 +183,7 @@ void tty_putchar_at(unsigned char c, uint8_t color, size_t x, size_t y) {
     }
     tty_column = x + 1;
     tty_row = y;
-    set_cursor_offset((tty_row * screen_width + tty_column));
+    // Don't draw cursor here - caller will handle it
 }
 
 // Internal version for printing that doesn't add to command buffer
@@ -195,7 +195,7 @@ void tty_putchar_internal(char c) {
             tty_scroll();
             tty_row = screen_height - 1;
         }
-        set_cursor_offset(tty_row * screen_width + tty_column);
+        // Don't update cursor here - batch output will handle it
         return;
     }
     
@@ -209,7 +209,6 @@ void tty_putchar_internal(char c) {
             tty_scroll();
             tty_row = screen_height - 1;
         }
-        set_cursor_offset(tty_row * screen_width + tty_column);
     }
 }
 
@@ -298,28 +297,53 @@ void tty_putnbr(int num) {
 }
 
 void tty_putstr(const char* data) {
+    // Hide cursor during output
+    if (fb_is_available()) {
+        terminal_hide_cursor();
+    }
+    
     for (int i = 0; i < strlength(data); i++)
         tty_putchar_internal(data[i]);
+    
+    // Update cursor position and show cursor
+    if (fb_is_available()) {
+        terminal_set_cursor(tty_column, tty_row);
+        terminal_draw_cursor();
+    } else {
+        set_cursor_offset(tty_row * screen_width + tty_column);
+    }
 }
 
 // Print decimal number (non-interactive, for system output)
 void tty_putdec(uint32_t num) {
+    // Hide cursor during output
+    if (fb_is_available()) {
+        terminal_hide_cursor();
+    }
+    
     if (num == 0) {
         tty_putchar_internal('0');
-        return;
+    } else {
+        char buffer[20];
+        int i = 0;
+        
+        while (num > 0) {
+            buffer[i++] = (num % 10) + '0';
+            num /= 10;
+        }
+        
+        // Print the number in reverse
+        for (int j = i - 1; j >= 0; j--) {
+            tty_putchar_internal(buffer[j]);
+        }
     }
     
-    char buffer[20];
-    int i = 0;
-    
-    while (num > 0) {
-        buffer[i++] = (num % 10) + '0';
-        num /= 10;
-    }
-    
-    // Print the number in reverse
-    for (int j = i - 1; j >= 0; j--) {
-        tty_putchar_internal(buffer[j]);
+    // Update cursor position and show cursor
+    if (fb_is_available()) {
+        terminal_set_cursor(tty_column, tty_row);
+        terminal_draw_cursor();
+    } else {
+        set_cursor_offset(tty_row * screen_width + tty_column);
     }
 }
 
@@ -345,28 +369,20 @@ void tty_middle_screen(const char* data) {
 
 void set_cursor_offset(size_t offset) {
     if (fb_is_available()) {
-        // In framebuffer mode, we draw a software cursor
-        // First hide the old cursor
+        // In framebuffer mode, update position and draw cursor
         terminal_hide_cursor();
-        
-        // Update cursor position in terminal
         size_t col = offset % screen_width;
         size_t row = offset / screen_width;
         terminal_set_cursor(col, row);
-        
-        // Draw the new cursor
         terminal_draw_cursor();
         return;
     }
     
     // VGA hardware cursor (only works in text mode)
-    // Send the high byte of the offset
-    outb(0x3D4, 14);                   // Command port for high byte
-    outb(0x3D5, (uint8_t)(offset >> 8)); // Send high byte
-
-    // Send the low byte of the offset
-    outb(0x3D4, 15);                   // Command port for low byte
-    outb(0x3D5, (uint8_t)(offset & 0xFF)); // Send low byte
+    outb(0x3D4, 14);
+    outb(0x3D5, (uint8_t)(offset >> 8));
+    outb(0x3D4, 15);
+    outb(0x3D5, (uint8_t)(offset & 0xFF));
 }
 
 // Handle backspace
@@ -994,6 +1010,11 @@ static void history_add(const char* cmd) {
 
 // Helper: Clear current command line on screen
 static void clear_command_line(void) {
+    // Hide cursor during clearing
+    if (fb_is_available()) {
+        terminal_hide_cursor();
+    }
+    
     // Move to prompt position and clear the line
     tty_row = prompt_row;
     tty_column = prompt_column;
@@ -1009,12 +1030,24 @@ static void clear_command_line(void) {
             tty_buffer[index] = vga_entry(' ', tty_color);
         }
     }
-    set_cursor_offset(tty_row * screen_width + tty_column);
+    
+    // Update cursor
+    if (fb_is_available()) {
+        terminal_set_cursor(tty_column, tty_row);
+        terminal_draw_cursor();
+    } else {
+        set_cursor_offset(tty_row * screen_width + tty_column);
+    }
 }
 
 // Helper: Display a command on the current line
 static void display_command(const char* cmd) {
     clear_command_line();
+    
+    // Hide cursor while displaying
+    if (fb_is_available()) {
+        terminal_hide_cursor();
+    }
     
     // Copy to cmd_buffer and display
     cmd_buffer_pos = 0;
@@ -1023,6 +1056,14 @@ static void display_command(const char* cmd) {
         tty_putchar_internal(cmd[i]);
     }
     cmd_cursor_pos = cmd_buffer_pos;
+    
+    // Show cursor at end
+    if (fb_is_available()) {
+        terminal_set_cursor(tty_column, tty_row);
+        terminal_draw_cursor();
+    } else {
+        set_cursor_offset(tty_row * screen_width + tty_column);
+    }
 }
 
 // Navigate to previous command in history (up arrow)
@@ -1152,6 +1193,11 @@ void tty_print_history(void) {
     tty_putstr("Command History:\n");
     tty_putstr("----------------\n");
     
+    // Hide cursor during history output
+    if (fb_is_available()) {
+        terminal_hide_cursor();
+    }
+    
     // Print line by line with line numbers
     int line_num = 1;
     int line_start = 0;
@@ -1159,7 +1205,8 @@ void tty_print_history(void) {
     for (int i = 0; i <= bytes_read - 1; i++) {
         if (buffer[i] == '\n' || buffer[i] == '\0') {
             // Print line number
-            tty_putstr("  ");
+            tty_putchar_internal(' ');
+            tty_putchar_internal(' ');
             if (line_num < 10) {
                 tty_putchar_internal(' ');
             }
@@ -1174,7 +1221,8 @@ void tty_print_history(void) {
                 tty_putchar_internal('0' + (line_num / 10) % 10);
             }
             tty_putchar_internal('0' + line_num % 10);
-            tty_putstr("  ");
+            tty_putchar_internal(' ');
+            tty_putchar_internal(' ');
             
             // Print the line content
             for (int j = line_start; j < i; j++) {
@@ -1189,6 +1237,14 @@ void tty_print_history(void) {
             
             if (buffer[i] == '\0') break;
         }
+    }
+    
+    // Show cursor at end
+    if (fb_is_available()) {
+        terminal_set_cursor(tty_column, tty_row);
+        terminal_draw_cursor();
+    } else {
+        set_cursor_offset(tty_row * screen_width + tty_column);
     }
 }
 

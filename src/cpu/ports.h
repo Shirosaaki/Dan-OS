@@ -36,4 +36,16 @@ static inline void outw(u16 port, u16 val) {
     asm volatile ("outw %0, %1" : : "a"(val), "Nd"(port));
 }
 
+// Write a double word (32-bit) to the specified port
+static inline void outl(u16 port, u32 val) {
+    asm volatile ("outl %0, %1" : : "a"(val), "Nd"(port));
+}
+
+// Read a double word (32-bit) from the specified port
+static inline u32 inl(u16 port) {
+    u32 ret;
+    asm volatile ("inl %1, %0" : "=a"(ret) : "Nd"(port));
+    return ret;
+}
+
 #endif

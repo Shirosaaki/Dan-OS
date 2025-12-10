@@ -7,6 +7,8 @@
 #include "ata.h"
 #include "rtc.h"
 #include "tty.h"
+#include "net.h"
+#include "e1000.h"
 
 extern void tty_putchar_internal(char c);
 extern size_t tty_row;
@@ -44,6 +46,9 @@ void tty_process_command(void) {
             tty_putstr("  timezone - Set timezone (timezone +/-H:M NAME or timezone list)\n");
             tty_putstr("  disk     - Show disk information\n");
             tty_putstr("  history  - Show command history\n");
+            tty_putstr("  ping     - Ping an IP address (ping x.x.x.x)\n");
+            tty_putstr("  ifconfig - Show network interface information\n");
+            tty_putstr("  netpoll  - Poll network for packets (debug)\n");
             tty_putstr("  reboot   - Reboot the system\n");
             tty_putstr("  shutdown  - Shut down the system\n");
         } else if (strncmp(cmd_buffer, "cls", 3) == 0) {
@@ -633,6 +638,148 @@ void tty_process_command(void) {
             tty_putstr("Shutting down system...\n");
             kernel_shutdown();
             for(;;) __asm__ volatile("hlt");
+        } else if (strncmp(cmd_buffer, "ping ", 5) == 0) {
+            // ping command - send ICMP echo request
+            // Parse IP address: ping x.x.x.x
+            char* ip_str = cmd_buffer + 5;
+            uint32_t ip = 0;
+            int octet = 0;
+            int num = 0;
+            for (int i = 0; ip_str[i] != '\0' && ip_str[i] != ' '; i++) {
+                if (ip_str[i] == '.') {
+                    if (octet >= 3) break;
+                    ip = (ip << 8) | (num & 0xFF);
+                    num = 0;
+                    octet++;
+                } else if (ip_str[i] >= '0' && ip_str[i] <= '9') {
+                    num = num * 10 + (ip_str[i] - '0');
+                }
+            }
+            ip = (ip << 8) | (num & 0xFF);  // Add last octet
+            
+            if (octet != 3) {
+                tty_putstr("Usage: ping x.x.x.x\n");
+            } else {
+                net_interface_t* iface = net_get_interface();
+                if (!iface) {
+                    tty_putstr("No network interface available\n");
+                } else {
+                    char ip_buf[16];
+                    ip_to_string(ip, ip_buf);
+                    tty_putstr("Pinging ");
+                    tty_putstr(ip_buf);
+                    tty_putstr("...\n");
+                    
+                    // Reset ping state
+                    ping_reply_received = 0;
+                    
+                    // Try to send ping (may fail if ARP not resolved)
+                    int sent = 0;
+                    if (icmp_send_echo(iface, ip, 1, 1, "DanOS", 5) == 0) {
+                        sent = 1;
+                    } else {
+                        tty_putstr("Resolving MAC address...\n");
+                        // Wait for ARP reply (up to ~2 seconds)
+                        for (volatile int i = 0; i < 20000000 && !sent; i++) {
+                            e1000_poll();
+                            if (i % 5000000 == 0 && i > 0) {
+                                // Retry sending ping
+                                if (icmp_send_echo(iface, ip, 1, 1, "DanOS", 5) == 0) {
+                                    sent = 1;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (sent) {
+                        tty_putstr("Waiting for reply (30s timeout)...\n");
+                        
+                        // Wait up to 30 seconds for reply
+                        // ~100 million iterations ≈ 30 seconds on typical QEMU speed
+                        int timeout = 0;
+                        for (volatile uint32_t i = 0; i < 100000000; i++) {
+                            e1000_poll();
+                            
+                            if (ping_reply_received) {
+                                // Got a reply!
+                                char reply_ip[16];
+                                ip_to_string(ping_reply_from, reply_ip);
+                                tty_putstr("Reply from ");
+                                tty_putstr(reply_ip);
+                                tty_putstr(": seq=");
+                                tty_putdec(ping_reply_seq);
+                                tty_putstr("\n");
+                                timeout = 0;
+                                break;
+                            }
+                            
+                            // Check for Ctrl+C (stop signal)
+                            if (tty_check_stop()) {
+                                tty_putstr("\nPing interrupted.\n");
+                                timeout = 0;
+                                break;
+                            }
+                        }
+                        
+                        if (!ping_reply_received && timeout == 0) {
+                            // Loop finished without reply and wasn't interrupted
+                            if (!tty_check_stop()) {
+                                tty_putstr("Request timed out.\n");
+                            }
+                        }
+                    } else {
+                        tty_putstr("Failed to send ping (could not resolve MAC)\n");
+                    }
+                }
+            }
+        } else if (strncmp(cmd_buffer, "ifconfig", 8) == 0 && (strlength(cmd_buffer) == 8 || cmd_buffer[8] == ' ')) {
+            // ifconfig - show/configure network interface
+            net_interface_t* iface = net_get_interface();
+            if (!iface) {
+                tty_putstr("No network interface available\n");
+            } else {
+                char buf[32];
+                tty_putstr("Interface: ");
+                tty_putstr(iface->name);
+                tty_putstr("\n");
+                
+                tty_putstr("  MAC: ");
+                mac_to_string(&iface->mac, buf);
+                tty_putstr(buf);
+                tty_putstr("\n");
+                
+                tty_putstr("  IP:  ");
+                ip_to_string(iface->ip, buf);
+                tty_putstr(buf);
+                tty_putstr("\n");
+                
+                tty_putstr("  Mask: ");
+                ip_to_string(iface->netmask, buf);
+                tty_putstr(buf);
+                tty_putstr("\n");
+                
+                tty_putstr("  GW:  ");
+                ip_to_string(iface->gateway, buf);
+                tty_putstr(buf);
+                tty_putstr("\n");
+                
+                tty_putstr("  TX: ");
+                tty_putdec((uint32_t)iface->tx_packets);
+                tty_putstr(" packets, ");
+                tty_putdec((uint32_t)iface->tx_bytes);
+                tty_putstr(" bytes\n");
+                
+                tty_putstr("  RX: ");
+                tty_putdec((uint32_t)iface->rx_packets);
+                tty_putstr(" packets, ");
+                tty_putdec((uint32_t)iface->rx_bytes);
+                tty_putstr(" bytes\n");
+            }
+        } else if (strncmp(cmd_buffer, "netpoll", 7) == 0) {
+            // Manual network poll - useful for debugging
+            tty_putstr("Polling network...\n");
+            e1000_poll();
+            tty_putstr("Done.\n");
         } else {
             tty_putstr("Unknown command: ");
             tty_putstr(cmd_buffer);

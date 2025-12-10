@@ -113,7 +113,11 @@ re: clean build
 
 .PHONY: run
 run:
-	@ qemu-system-x86_64 -cdrom $(ISO) -drive file=$(DISK_IMG),format=raw -boot d -serial stdio -display sdl -vga std -m 512
+	@ qemu-system-x86_64 -cdrom $(ISO) -drive file=$(DISK_IMG),format=raw -boot d -serial stdio -display sdl -vga std -m 512 -netdev tap,id=net0,ifname=tap0,script=no,downscript=no -device e1000,netdev=net0
+
+.PHONY: run-user
+run-user:
+	@ qemu-system-x86_64 -cdrom $(ISO) -drive file=$(DISK_IMG),format=raw -boot d -serial stdio -display sdl -vga std -m 512 -netdev user,id=net0 -device e1000,netdev=net0
 
 .PHONY: run-no-disk
 run-no-disk:
