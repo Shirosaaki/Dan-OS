@@ -143,3 +143,33 @@ void kfree(void *ptr) {
         cur = cur->next;
     }
 }
+
+// Allocate memory with specified alignment
+void *kmalloc_aligned(size_t size, size_t alignment) {
+    if (size == 0 || alignment == 0) return NULL;
+    
+    // Ensure alignment is at least 8 and a power of 2
+    if (alignment < 8) alignment = 8;
+    
+    // Allocate extra space for alignment and storing the original pointer
+    size_t total = size + alignment + sizeof(void*);
+    void *raw = kmalloc(total);
+    if (!raw) return NULL;
+    
+    // Calculate aligned address
+    uintptr_t raw_addr = (uintptr_t)raw;
+    uintptr_t aligned_addr = (raw_addr + sizeof(void*) + alignment - 1) & ~(alignment - 1);
+    
+    // Store original pointer just before the aligned address
+    *((void**)(aligned_addr - sizeof(void*))) = raw;
+    
+    return (void*)aligned_addr;
+}
+
+// Free aligned memory (note: must use kfree_aligned or track alignment)
+void kfree_aligned(void *ptr) {
+    if (!ptr) return;
+    // Retrieve original pointer stored just before aligned address
+    void *raw = *((void**)((uintptr_t)ptr - sizeof(void*)));
+    kfree(raw);
+}

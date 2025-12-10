@@ -20,6 +20,7 @@
 	void tty_backspace(void);
 	void tty_process_command(void);
 	void tty_putchar_internal(char c);
+	void tty_puthex(uint32_t v);
 	void tty_puthex64(uint64_t v);
 	
 	// Line editing functions

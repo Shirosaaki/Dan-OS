@@ -94,7 +94,82 @@ void keyboard_init(void) {
     caps_lock = 0;
     num_lock = 1; // Enable numlock by default
     
-    // Enable keyboard interrupts (unmask IRQ1)
+    // Wait for keyboard controller to be ready
+    while (inb(KEYBOARD_STATUS_PORT) & 0x02);
+    
+    // Disable devices during initialization
+    outb(KEYBOARD_STATUS_PORT, 0xAD); // Disable first PS/2 port
+    outb(KEYBOARD_STATUS_PORT, 0xA7); // Disable second PS/2 port (if exists)
+    
+    // Flush the output buffer
+    while (inb(KEYBOARD_STATUS_PORT) & 0x01) {
+        inb(KEYBOARD_DATA_PORT);
+    }
+    
+    // Read controller configuration byte
+    while (inb(KEYBOARD_STATUS_PORT) & 0x02);
+    outb(KEYBOARD_STATUS_PORT, 0x20);
+    while (!(inb(KEYBOARD_STATUS_PORT) & 0x01));
+    uint8_t config = inb(KEYBOARD_DATA_PORT);
+    
+    // Enable IRQ1 (keyboard interrupt) and translation
+    config |= 0x01;  // Enable IRQ1
+    config |= 0x40;  // Enable translation (scancode set 1)
+    config &= ~0x10; // Enable keyboard clock
+    
+    // Write back configuration
+    while (inb(KEYBOARD_STATUS_PORT) & 0x02);
+    outb(KEYBOARD_STATUS_PORT, 0x60);
+    while (inb(KEYBOARD_STATUS_PORT) & 0x02);
+    outb(KEYBOARD_DATA_PORT, config);
+    
+    // Perform controller self-test
+    while (inb(KEYBOARD_STATUS_PORT) & 0x02);
+    outb(KEYBOARD_STATUS_PORT, 0xAA);
+    while (!(inb(KEYBOARD_STATUS_PORT) & 0x01));
+    uint8_t test_result = inb(KEYBOARD_DATA_PORT);
+    if (test_result != 0x55) {
+        // Controller self-test failed, but continue anyway
+        // Some controllers don't respond properly
+    }
+    
+    // Test first PS/2 port
+    while (inb(KEYBOARD_STATUS_PORT) & 0x02);
+    outb(KEYBOARD_STATUS_PORT, 0xAB);
+    while (!(inb(KEYBOARD_STATUS_PORT) & 0x01));
+    inb(KEYBOARD_DATA_PORT); // Read and discard result
+    
+    // Re-enable first PS/2 port
+    while (inb(KEYBOARD_STATUS_PORT) & 0x02);
+    outb(KEYBOARD_STATUS_PORT, 0xAE);
+    
+    // Reset keyboard device
+    while (inb(KEYBOARD_STATUS_PORT) & 0x02);
+    outb(KEYBOARD_DATA_PORT, 0xFF);
+    
+    // Wait for ACK (0xFA) and self-test result (0xAA)
+    // Some keyboards may not respond, so add timeout
+    for (int timeout = 0; timeout < 100000; timeout++) {
+        if (inb(KEYBOARD_STATUS_PORT) & 0x01) {
+            uint8_t response = inb(KEYBOARD_DATA_PORT);
+            if (response == 0xAA) break; // Self-test passed
+            if (response == 0xFC || response == 0xFD) break; // Self-test failed
+        }
+    }
+    
+    // Enable scanning (keyboard will start sending scancodes)
+    while (inb(KEYBOARD_STATUS_PORT) & 0x02);
+    outb(KEYBOARD_DATA_PORT, 0xF4);
+    
+    // Wait for ACK
+    for (int timeout = 0; timeout < 100000; timeout++) {
+        if (inb(KEYBOARD_STATUS_PORT) & 0x01) {
+            inb(KEYBOARD_DATA_PORT);
+            break;
+        }
+    }
+    
+    // Enable keyboard interrupts (unmask IRQ1) in PIC
     uint8_t mask = inb(0x21);
     mask &= ~0x02; // Clear bit 1 (IRQ1)
     outb(0x21, mask);

@@ -9,6 +9,9 @@
 #include "tty.h"
 #include "net.h"
 #include "e1000.h"
+#include "dns.h"
+#include "tcp.h"
+#include "http.h"
 
 extern void tty_putchar_internal(char c);
 extern size_t tty_row;
@@ -49,6 +52,8 @@ void tty_process_command(void) {
             tty_putstr("  ping     - Ping an IP address (ping x.x.x.x)\n");
             tty_putstr("  ifconfig - Show network interface information\n");
             tty_putstr("  netpoll  - Poll network for packets (debug)\n");
+            tty_putstr("  dns      - Resolve hostname to IP (dns hostname)\n");
+            tty_putstr("  fetch    - Fetch a webpage (fetch http://url)\n");
             tty_putstr("  reboot   - Reboot the system\n");
             tty_putstr("  shutdown  - Shut down the system\n");
         } else if (strncmp(cmd_buffer, "cls", 3) == 0) {
@@ -774,6 +779,99 @@ void tty_process_command(void) {
                 tty_putstr(" packets, ");
                 tty_putdec((uint32_t)iface->rx_bytes);
                 tty_putstr(" bytes\n");
+            }
+        } else if (strncmp(cmd_buffer, "dns ", 4) == 0) {
+            // DNS lookup command
+            char* hostname = cmd_buffer + 4;
+            
+            // Skip leading spaces
+            while (*hostname == ' ') hostname++;
+            
+            if (*hostname == '\0') {
+                tty_putstr("Usage: dns hostname\n");
+                tty_putstr("Example: dns www.google.com\n");
+            } else {
+                tty_putstr("Resolving ");
+                tty_putstr(hostname);
+                tty_putstr("...\n");
+                
+                uint32_t ip;
+                if (dns_resolve(hostname, &ip) == 0) {
+                    char ip_str[16];
+                    ip_to_string(ip, ip_str);
+                    tty_putstr("Resolved to: ");
+                    tty_putstr(ip_str);
+                    tty_putstr("\n");
+                } else {
+                    tty_putstr("DNS resolution failed\n");
+                }
+            }
+        } else if (strncmp(cmd_buffer, "fetch ", 6) == 0) {
+            // Fetch a webpage via HTTP
+            char* url = cmd_buffer + 6;
+            
+            // Skip leading spaces
+            while (*url == ' ') url++;
+            
+            if (*url == '\0') {
+                tty_putstr("Usage: fetch http://hostname/path\n");
+                tty_putstr("Example: fetch http://example.com/\n");
+                tty_putstr("Note: Only HTTP is supported (not HTTPS)\n");
+            } else {
+                tty_putstr("Fetching: ");
+                tty_putstr(url);
+                tty_putstr("\n");
+                
+                // Allocate response body buffer
+                static char body_buffer[8192];
+                http_response_t response;
+                http_response_init(&response, body_buffer, sizeof(body_buffer));
+                
+                // http_fetch handles URL parsing and HTTPS warning
+                if (http_fetch(url, &response) == 0) {
+                    tty_putstr("\n--- HTTP Response ---\n");
+                    tty_putstr("Status: ");
+                    tty_putdec(response.status_code);
+                    tty_putstr(" ");
+                    tty_putstr(response.status_text);
+                    tty_putstr("\n");
+                    
+                    if (response.content_type[0]) {
+                        tty_putstr("Content-Type: ");
+                        tty_putstr(response.content_type);
+                        tty_putstr("\n");
+                    }
+                    
+                    tty_putstr("Content-Length: ");
+                    tty_putdec((uint32_t)response.body_len);
+                    tty_putstr(" bytes\n");
+                    
+                    tty_putstr("\n--- Body (first 2KB) ---\n");
+                    
+                    // Print body (truncate if too long)
+                    size_t display_len = response.body_len;
+                    if (display_len > 2048) display_len = 2048;
+                    
+                    for (size_t i = 0; i < display_len; i++) {
+                        char c = response.body[i];
+                        if (c >= 32 && c < 127) {
+                            tty_putchar_internal(c);
+                        } else if (c == '\n' || c == '\r') {
+                            tty_putchar_internal('\n');
+                        } else if (c == '\t') {
+                            tty_putstr("    ");
+                        }
+                    }
+                    
+                    if (response.body_len > 2048) {
+                        tty_putstr("\n\n[...truncated, ");
+                        tty_putdec((uint32_t)(response.body_len - 2048));
+                        tty_putstr(" more bytes...]\n");
+                    }
+                    tty_putstr("\n");
+                } else {
+                    tty_putstr("Failed to fetch URL\n");
+                }
             }
         } else if (strncmp(cmd_buffer, "netpoll", 7) == 0) {
             // Manual network poll - useful for debugging

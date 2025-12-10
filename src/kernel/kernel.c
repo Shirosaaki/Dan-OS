@@ -17,6 +17,9 @@
 #include "framebuffer.h"
 #include "net.h"
 #include "e1000.h"
+#include "tcp.h"
+#include "dns.h"
+#include "usb.h"
 
 void kernel_main(void *multiboot_info) {
     // Try to initialize framebuffer from Multiboot2 info
@@ -83,7 +86,17 @@ void kernel_main(void *multiboot_info) {
     if (e1000_init() != 0) {
         tty_putstr("Warning: No network card detected.\n");
     }
+    // Initialize TCP stack
+    tcp_init();
+    // Initialize DNS resolver
+    dns_init();
+    // Initialize USB subsystem (includes PCI scan and USB controller init)
+    usb_init();
+    
+    // Main loop - poll USB devices
     while (1) {
+        // Poll USB for keyboard input (works alongside PS/2)
+        usb_poll();
         __asm__ volatile("hlt"); // Halt until next interrupt
     }
 }

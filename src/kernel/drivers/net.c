@@ -4,6 +4,7 @@
 //
 
 #include "net.h"
+#include "tcp.h"
 #include "tty.h"
 #include "string.h"
 #include <stddef.h>
@@ -462,7 +463,9 @@ void ipv4_receive(net_interface_t* iface, const ipv4_header_t* ip, size_t len) {
             break;
             
         case IP_PROTO_TCP:
-            // TCP not implemented yet
+            if (payload_len >= sizeof(tcp_header_t)) {
+                tcp_receive(iface, src_ip, (const tcp_header_t*)payload, payload_len);
+            }
             break;
             
         default:

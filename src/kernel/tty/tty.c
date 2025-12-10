@@ -359,6 +359,18 @@ void tty_puthex64(uint64_t v) {
     tty_putstr(buf);
 }
 
+void tty_puthex(uint32_t v) {
+    char buf[9];
+    const char *hex = "0123456789ABCDEF";
+    for (int i = 0; i < 8; ++i) {
+        buf[7 - i] = hex[v & 0xF];
+        v >>= 4;
+    }
+    buf[8] = '\0';
+    tty_putstr("0x");
+    tty_putstr(buf);
+}
+
 void tty_middle_screen(const char* data) {
     size_t len = strlength(data);
     size_t x = (screen_width - len) / 2;
