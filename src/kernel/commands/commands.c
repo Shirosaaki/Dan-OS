@@ -86,7 +86,6 @@ void tty_process_command(void) {
                 }
             } else {
                 // ls -a: list current directory with hidden files
-                tty_putstr("Directory listing (all files):\n");
                 uint32_t current_cluster = fat32_get_current_directory();
                 if (fat32_list_directory_ex(current_cluster, 1) != 0) {
                     tty_putstr("Error reading directory\n");
@@ -107,7 +106,6 @@ void tty_process_command(void) {
                 }
             } else {
                 // ls - list current directory (hide hidden files)
-                tty_putstr("Directory listing:\n");
                 uint32_t current_cluster = fat32_get_current_directory();
                 if (fat32_list_directory(current_cluster) != 0) {
                     tty_putstr("Error reading directory\n");

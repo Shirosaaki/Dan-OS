@@ -135,10 +135,6 @@ void pci_init(void) {
             }
         }
     }
-    
-    tty_putstr("PCI: Found ");
-    tty_putdec(pci_device_count);
-    tty_putstr(" devices\n");
 }
 
 // Find device by vendor and device ID

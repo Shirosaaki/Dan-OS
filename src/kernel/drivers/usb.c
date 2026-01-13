@@ -288,10 +288,6 @@ static int usb_keyboard_probe(usb_device_t* dev) {
         return -1;
     }
     
-    tty_putstr("USB: Found keyboard on interface ");
-    tty_putdec(interface_num);
-    tty_putstr("\n");
-    
     // Set configuration
     if (usb_set_configuration(dev, config->bConfigurationValue) != USB_TRANSFER_SUCCESS) {
         tty_putstr("USB: Failed to set configuration\n");
@@ -313,8 +309,6 @@ static int usb_keyboard_probe(usb_device_t* dev) {
     for (int i = 0; i < 8; i++) {
         usb_keyboard_prev_report[i] = 0;
     }
-    
-    tty_putstr("USB: Keyboard initialized\n");
     
     return 0;
 }
@@ -376,14 +370,6 @@ static void usb_enumerate_device(usb_controller_t* ctrl, int port, int speed) {
         return;
     }
     
-    tty_putstr("USB: Device ");
-    tty_puthex(dev->device_desc.idVendor);
-    tty_putstr(":");
-    tty_puthex(dev->device_desc.idProduct);
-    tty_putstr(" at address ");
-    tty_putdec(address);
-    tty_putstr("\n");
-    
     // Store device
     for (int i = 0; i < USB_MAX_DEVICES; i++) {
         if (!ctrl->devices[i]) {
@@ -422,17 +408,14 @@ static int usb_init_controller(pci_device_t* pci_dev) {
     
     switch (pci_dev->prog_if) {
         case PCI_USB_PROG_IF_UHCI:
-            tty_putstr("USB: Initializing UHCI controller\n");
             result = uhci_init(ctrl, pci_dev);
             break;
             
         case PCI_USB_PROG_IF_EHCI:
-            tty_putstr("USB: Initializing EHCI controller\n");
             result = ehci_init(ctrl, pci_dev);
             break;
             
         case PCI_USB_PROG_IF_XHCI:
-            tty_putstr("USB: Initializing XHCI controller\n");
             result = xhci_init(ctrl, pci_dev);
             break;
             
@@ -451,9 +434,7 @@ static int usb_init_controller(pci_device_t* pci_dev) {
 }
 
 // Initialize USB subsystem
-void usb_init(void) {
-    tty_putstr("USB: Initializing USB subsystem\n");
-    
+void usb_init(void) {    
     num_usb_controllers = 0;
     num_usb_drivers = 0;
     
@@ -486,10 +467,6 @@ void usb_init(void) {
     
     // Register keyboard driver
     usb_register_driver(&usb_keyboard_driver);
-    
-    tty_putstr("USB: Found ");
-    tty_putdec(num_usb_controllers);
-    tty_putstr(" USB controller(s)\n");
     
     // Initial scan for connected devices
     for (int i = 0; i < num_usb_controllers; i++) {
