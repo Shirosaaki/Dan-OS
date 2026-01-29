@@ -182,7 +182,7 @@ void fat32_parse_filename(const char* input, char* output) {
 
 // Parse filename and return case flags for the reserved byte
 // Returns: bit 3 (0x08) if basename is lowercase, bit 4 (0x10) if extension is lowercase
-uint8_t fat32_parse_filename_with_case(const char* input, char* output) {
+static uint8_t fat32_parse_filename_with_case(const char* input, char* output) {
     int i, j;
     uint8_t case_flags = 0;
     int name_has_lower = 0, name_has_upper = 0;
@@ -285,7 +285,7 @@ int fat32_compare_names(const char* name1, const char* name2) {
 
 // Compare FAT filenames with case sensitivity using case flags
 // Returns 1 if names match including case, 0 otherwise
-int fat32_compare_names_case_sensitive(const char* fat_name, uint8_t expected_case_flags, 
+static int fat32_compare_names_case_sensitive(const char* fat_name, uint8_t expected_case_flags, 
                                         const char* entry_name, uint8_t entry_case_flags) {
     // First check if the base names match (case-insensitive in FAT32 storage)
     for (int i = 0; i < 11; i++) {
@@ -1230,26 +1230,6 @@ int fat32_create_directory(const char* dirname) {
     tty_putstr(dirname);
     tty_putstr("\n");
     return 0;
-    
-    /*
-    char fat32_name[11];
-    fat32_parse_filename(dirname, fat32_name);
-    
-    // Check if directory already exists
-    fat32_dir_entry_t existing_entry;
-    if (fat32_find_file(dirname, current_directory_cluster, &existing_entry) == 0) {
-        tty_putstr("Error: Directory already exists: ");
-        tty_putstr(dirname);
-        tty_putstr("\n");
-        return -1;
-    }
-    
-    // Allocate cluster for new directory
-    uint32_t dir_cluster = fat32_allocate_cluster();
-    if (dir_cluster == 0) {
-        tty_putstr("Error: No free clusters available\n");
-        return -1;
-    }*/
 }
 
 // Change current directory

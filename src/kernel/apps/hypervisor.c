@@ -1,7 +1,6 @@
-/**==============================================
- *             apps/hypervisor.c
- *  Ported VMM for DanOS
- *=============================================**/
+//
+// Ported VMM for DanOS
+//
 
 #include <kernel/apps/kvm_stub.h>
 #include <kernel/sys/tty.h>
@@ -9,12 +8,16 @@
 #include <kernel/fs/fat32.h>
 #include <kernel/sys/string.h>
 #include <kernel/sys/scheduler.h>
+#include <kernel/drivers/keyboard.h>
+
+// Forward declarations
+static void vm_task_impl(vm_t *vm, const char *filename);
 
 // Configuration
 #define RAM_SIZE 0x8000 // 32KB
 
 // --- Utils ---
-void vm_err(const char *msg) {
+static void vm_err(const char *msg) {
     tty_putstr("[VM ERROR] ");
     tty_putstr(msg);
     tty_putstr("\n");
@@ -22,7 +25,7 @@ void vm_err(const char *msg) {
 
 // --- VM Logic ---
 // Changed return type to int to propagate errors
-int vm_init(vm_t *vm) {
+static int vm_init(vm_t *vm) {
     // 1. Create VM
     vm->vm_fd = danos_kvm_create_vm();
     if (vm->vm_fd < 0) { vm_err("Create VM failed"); return -1; }
@@ -55,7 +58,7 @@ int vm_init(vm_t *vm) {
 }
 
 // --- Image Loading ---
-int vm_load_image(vm_t *vm, const char *filename) {
+static int vm_load_image(vm_t *vm, const char *filename) {
     fat32_file_t file;
     if (fat32_open_file(filename, &file) != 0) {
         tty_putstr("Failed to open file: ");
@@ -83,7 +86,7 @@ int vm_load_image(vm_t *vm, const char *filename) {
 }
 
 // --- VCPU Init ---
-int vcpu_init(vm_t *vm) {
+static int vcpu_init(vm_t *vm) {
     // 1. Create VCPU
     vm->vcpu_fd = danos_kvm_create_vcpu(vm->vm_fd);
     if (vm->vcpu_fd < 0) { vm_err("Create vCPU failed"); return -1; }
@@ -128,7 +131,7 @@ int vcpu_init(vm_t *vm) {
 }
 
 // --- Execution Loop ---
-void vcpu_run(vm_t *vm) {
+static void vcpu_run(vm_t *vm) {
     tty_putstr("[VCPU] Starting execution...\n");
     
     while (1) {
@@ -224,7 +227,7 @@ int vm_probe(const char *filename) {
     return 0;
 }
 
-void vm_task_impl(vm_t *vm, const char *filename) {
+static void vm_task_impl(vm_t *vm, const char *filename) {
     current_vm = vm;
 
     // SAFETY: Initialize pointer to NULL so we don't double free if init fails

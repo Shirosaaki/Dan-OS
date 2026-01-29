@@ -17,7 +17,7 @@ static idt_ptr_t idt_ptr;
 #define PIC2_DATA    0xA1
 
 // PIC initialization
-void pic_remap(void) {
+static void pic_remap(void) {
     // Save masks
     uint8_t mask1 = inb(PIC1_DATA);
     uint8_t mask2 = inb(PIC2_DATA);

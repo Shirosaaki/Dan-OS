@@ -94,7 +94,7 @@ int scheduler_add_task(void (*func)(void)) {
 }
 
 // Minimal trampoline placed in C; will call the passed function then loop
-__attribute__((noreturn)) void task_trampoline_c(void (*func)(void)) {
+static __attribute__((noreturn)) void task_trampoline_c(void (*func)(void)) {
     // call the function
     func();
     // if it returns, set state to zombie and halt

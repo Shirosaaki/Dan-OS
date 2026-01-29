@@ -1,7 +1,6 @@
-/**==============================================
- *             include/kvm_stub.h
- *  Minimal KVM definitions for DanOS
- *=============================================**/
+//
+// Minimal KVM definitions for DanOS
+//
 
 #ifndef KVM_STUB_H
 #define KVM_STUB_H

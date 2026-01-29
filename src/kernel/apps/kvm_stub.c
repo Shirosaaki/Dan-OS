@@ -1,6 +1,6 @@
-// Author: Migrated & extended
-// Date: 2026-01-29
-// Brief: KVM stub / simple 16-bit x86 emulator (migrated to src/kernel/apps)
+//
+// KVM stub / simple 16-bit x86 emulator (migrated to src/kernel/apps)
+//
 
 #include <kernel/apps/kvm_stub.h>
 #include <kernel/sys/kmalloc.h>
