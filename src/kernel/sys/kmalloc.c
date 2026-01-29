@@ -1,8 +1,8 @@
 // Migrated kmalloc into src/kernel/sys
-#include "kmalloc.h"
-#include "pmm.h"
-#include "vmm.h"
-#include "string.h"
+#include <kernel/sys/kmalloc.h>
+#include <kernel/arch/x86_64/pmm.h>
+#include <kernel/arch/x86_64/vmm.h>
+#include <kernel/sys/string.h>
 #include <stdint.h>
 
 #define KERNEL_HEAP_BASE 0xFFFF800000000000ULL

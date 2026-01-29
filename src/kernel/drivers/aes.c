@@ -3,7 +3,7 @@
 // Based on FIPS 197
 //
 
-#include "aes.h"
+#include <kernel/drivers/aes.h>
 
 // S-box
 static const uint8_t sbox[256] = {

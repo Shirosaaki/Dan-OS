@@ -2,8 +2,8 @@
 // Created by Shirosaaki on 02/10/2025.
 //
 
-#include "ata.h"
-#include "tty.h"
+#include <kernel/drivers/ata.h>
+#include <kernel/sys/tty.h>
 #include "../../cpu/ports.h"
 
 static uint16_t ata_base = ATA_PRIMARY_IO;

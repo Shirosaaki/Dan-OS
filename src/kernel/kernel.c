@@ -2,24 +2,24 @@
 // Created by dan13615 on 11/15/24.
 //
 
-#include "tty.h"
-#include "idt.h"
-#include "keyboard.h"
-#include "ata.h"
-#include "fat32.h"
-#include "rtc.h"
-#include "string.h"
+#include <kernel/sys/tty.h>
+#include <kernel/arch/x86_64/idt.h>
+#include <kernel/drivers/keyboard.h>
+#include <kernel/drivers/ata.h>
+#include <kernel/fs/fat32.h>
+#include <kernel/drivers/rtc.h>
+#include <kernel/sys/string.h>
 #include <stdint.h>
-#include "pmm.h"
-#include "vmm.h"
-#include "scheduler.h"
-#include "syscall.h"
-#include "framebuffer.h"
-#include "net.h"
-#include "e1000.h"
-#include "tcp.h"
-#include "dns.h"
-#include "usb.h"
+#include <kernel/arch/x86_64/pmm.h>
+#include <kernel/arch/x86_64/vmm.h>
+#include <kernel/sys/scheduler.h>
+#include <kernel/sys/syscall.h>
+#include <kernel/drivers/framebuffer.h>
+#include <kernel/net/net.h>
+#include <kernel/drivers/e1000.h>
+#include <kernel/net/tcp.h>
+#include <kernel/net/dns.h>
+#include <kernel/drivers/usb.h>
 
 void kernel_main(void *multiboot_info) {
     // Try to initialize framebuffer from Multiboot2 info

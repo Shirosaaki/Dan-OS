@@ -2,10 +2,10 @@
 // Created by Shirosaaki on 02/10/2025.
 //
 
-#include "rtc.h"
+#include <kernel/drivers/rtc.h>
 #include "../../cpu/ports.h"
-#include "tty.h"
-#include "fat32.h"
+#include <kernel/sys/tty.h>
+#include <kernel/fs/fat32.h>
 
 // Global timezone settings
 static timezone_t current_timezone = {0, 0, "UTC"};  // Default to UTC

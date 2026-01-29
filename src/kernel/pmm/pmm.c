@@ -1,8 +1,8 @@
-#include "pmm.h"
+#include <kernel/arch/x86_64/pmm.h>
 #include <stdint.h>
 #include <stddef.h>
-#include "string.h" // for mem* helpers if available; fallback to local
-#include "tty.h"
+#include <kernel/sys/string.h> // for mem* helpers if available; fallback to local
+#include <kernel/sys/tty.h>
 
 // Simple bitmap physical memory manager.
 // Layout:

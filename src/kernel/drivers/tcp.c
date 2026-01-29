@@ -2,10 +2,10 @@
 // TCP (Transmission Control Protocol) Stack Implementation
 //
 
-#include "tcp.h"
-#include "net.h"
-#include "e1000.h"
-#include "tty.h"
+#include <kernel/net/tcp.h>
+#include <kernel/net/net.h>
+#include <kernel/drivers/e1000.h>
+#include <kernel/sys/tty.h>
 #include <stddef.h>
 
 // =============================================================================

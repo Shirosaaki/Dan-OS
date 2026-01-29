@@ -3,7 +3,7 @@
 // Based on FIPS 180-4
 //
 
-#include "sha256.h"
+#include <kernel/drivers/sha256.h>
 
 // SHA-256 constants (first 32 bits of fractional parts of cube roots of first 64 primes)
 static const uint32_t K[64] = {

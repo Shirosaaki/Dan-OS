@@ -2,7 +2,7 @@
 // Big Integer Implementation for RSA
 //
 
-#include "bigint.h"
+#include <kernel/drivers/bigint.h>
 
 void bigint_init(bigint_t* n) {
     for (int i = 0; i < BIGINT_MAX_WORDS; i++) {

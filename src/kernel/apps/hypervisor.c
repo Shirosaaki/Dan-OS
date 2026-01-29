@@ -3,12 +3,12 @@
  *  Ported VMM for DanOS
  *=============================================**/
 
-#include "kvm_stub.h"
-#include "tty.h"
-#include "kmalloc.h"
-#include "fat32.h"
-#include "string.h"
-#include "scheduler.h"
+#include <kernel/apps/kvm_stub.h>
+#include <kernel/sys/tty.h>
+#include <kernel/sys/kmalloc.h>
+#include <kernel/fs/fat32.h>
+#include <kernel/sys/string.h>
+#include <kernel/sys/scheduler.h>
 
 // Configuration
 #define RAM_SIZE 0x8000 // 32KB

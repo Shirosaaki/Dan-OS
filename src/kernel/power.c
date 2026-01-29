@@ -2,9 +2,9 @@
 // Created by automated patch on reboot/shutdown feature
 //
 
-#include "power.h"
-#include "../cpu/ports.h"
-#include "tty.h"
+#include <kernel/sys/power.h>
+#include <cpu/ports.h>
+#include <kernel/sys/tty.h>
 
 // Attempt to reboot using keyboard controller (works on many BIOS/PCs)
 void kernel_reboot(void) {

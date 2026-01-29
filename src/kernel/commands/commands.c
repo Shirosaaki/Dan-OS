@@ -2,16 +2,16 @@
 //
 // Created by Shirosaaki on 02/10/2025.
 //
-#include "commands.h"
-#include "fat32.h"
-#include "ata.h"
-#include "rtc.h"
-#include "tty.h"
-#include "net.h"
-#include "e1000.h"
-#include "dns.h"
-#include "tcp.h"
-#include "http.h"
+#include <kernel/sys/commands.h>
+#include <kernel/fs/fat32.h>
+#include <kernel/drivers/ata.h>
+#include <kernel/drivers/rtc.h>
+#include <kernel/sys/tty.h>
+#include <kernel/net/net.h>
+#include <kernel/drivers/e1000.h>
+#include <kernel/net/dns.h>
+#include <kernel/net/tcp.h>
+#include <kernel/net/http.h>
 
 extern void tty_putchar_internal(char c);
 extern size_t tty_row;

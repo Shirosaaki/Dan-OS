@@ -3,10 +3,10 @@
 // Intel 82540EM Gigabit Ethernet Controller (QEMU default)
 //
 
-#include "e1000.h"
-#include "net.h"
-#include "tty.h"
-#include "kmalloc.h"
+#include <kernel/drivers/e1000.h>
+#include <kernel/net/net.h>
+#include <kernel/sys/tty.h>
+#include <kernel/sys/kmalloc.h>
 #include "../../cpu/ports.h"
 #include <stddef.h>
 

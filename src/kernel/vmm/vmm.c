@@ -1,8 +1,8 @@
-#include "vmm.h"
-#include "pmm.h"
+#include <kernel/arch/x86_64/vmm.h>
+#include <kernel/arch/x86_64/pmm.h>
 #include <stdint.h>
 #include <stddef.h>
-#include "string.h"
+#include <kernel/sys/string.h>
 
 // Each page table is 4096 bytes and contains 512 8-byte entries
 #define ENTRIES_PER_TABLE 512

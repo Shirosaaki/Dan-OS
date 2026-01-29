@@ -1,9 +1,9 @@
-#include "scheduler.h"
-#include "kmalloc.h"
-#include "pmm.h"
-#include "vmm.h"
-#include "tty.h"
-#include "../cpu/ports.h"
+#include <kernel/sys/scheduler.h>
+#include <kernel/sys/kmalloc.h>
+#include <kernel/arch/x86_64/pmm.h>
+#include <kernel/arch/x86_64/vmm.h>
+#include <kernel/sys/tty.h>
+#include <cpu/ports.h>
 #include <stdint.h>
 #include <stddef.h>
 

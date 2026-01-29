@@ -1,10 +1,10 @@
-#include "elf.h"
-#include "fat32.h"
-#include "vmm.h"
-#include "pmm.h"
-#include "kmalloc.h"
-#include "string.h"
-#include "tty.h"
+#include <kernel/drivers/elf.h>
+#include <kernel/fs/fat32.h>
+#include <kernel/arch/x86_64/vmm.h>
+#include <kernel/arch/x86_64/pmm.h>
+#include <kernel/sys/kmalloc.h>
+#include <kernel/sys/string.h>
+#include <kernel/sys/tty.h>
 #include <stdint.h>
 #include <stddef.h>
 

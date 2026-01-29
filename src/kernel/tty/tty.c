@@ -3,13 +3,13 @@
 //
 
 #include <stddef.h>
-#include "string.h"
-#include "tty.h"
-#include "vga.h"
-#include "../../cpu/ports.h"
-#include "fat32.h"
-#include "rtc.h"
-#include "framebuffer.h"
+#include <kernel/sys/string.h>
+#include <kernel/sys/tty.h>
+#include <kernel/drivers/vga.h>
+#include <cpu/ports.h>
+#include <kernel/fs/fat32.h>
+#include <kernel/drivers/rtc.h>
+#include <kernel/drivers/framebuffer.h>
 
 // Make these non-static so they can be accessed from commands.c
 size_t tty_row;

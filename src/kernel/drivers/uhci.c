@@ -2,13 +2,12 @@
 // UHCI (USB 1.1) Controller Driver Implementation
 //
 
-#include "../includes/uhci.h"
-#include "../includes/pci.h"
-#include "../includes/usb.h"
-#include "../includes/tty.h"
-#include "../includes/kmalloc.h"
-#include "../../cpu/ports.h"
-
+#include <kernel/drivers/uhci.h>
+#include <kernel/drivers/pci.h>
+#include <kernel/drivers/usb.h>
+#include <kernel/sys/tty.h>
+#include <kernel/sys/kmalloc.h>
+#include <cpu/ports.h>
 // Forward declarations
 static int uhci_init_controller(usb_controller_t* ctrl);
 static void uhci_shutdown(usb_controller_t* ctrl);

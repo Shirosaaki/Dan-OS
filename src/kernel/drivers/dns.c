@@ -2,11 +2,11 @@
 // DNS (Domain Name System) Resolver Implementation
 //
 
-#include "dns.h"
-#include "net.h"
-#include "e1000.h"
-#include "tty.h"
-#include "string.h"
+#include <kernel/net/dns.h>
+#include <kernel/net/net.h>
+#include <kernel/drivers/e1000.h>
+#include <kernel/sys/tty.h>
+#include <kernel/sys/string.h>
 #include <stddef.h>
 
 // =============================================================================

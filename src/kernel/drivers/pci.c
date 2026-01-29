@@ -2,9 +2,9 @@
 // PCI Bus Driver Implementation
 //
 
-#include "../includes/pci.h"
-#include "../../cpu/ports.h"
-#include "../includes/tty.h"
+#include <kernel/drivers/pci.h>
+#include <cpu/ports.h>
+#include <kernel/sys/tty.h>
 
 // Array of discovered PCI devices
 static pci_device_t pci_devices[PCI_MAX_DEVICES];

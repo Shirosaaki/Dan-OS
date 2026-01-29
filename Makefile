@@ -1,44 +1,56 @@
 ASM_SRCS 	=	$(wildcard src/bootloader/*.asm)
-ASMS64_SRCS = $(wildcard src/kernel/*.S)
+ASMS64_SRCS = $(wildcard src/kernel/arch/x86_64/*.S)
 
 KERNEL_SRCS =	$(wildcard src/kernel/*.c)
-TTY_SRCS 	=	$(wildcard src/kernel/tty/*.c)
-STR_SRCS 	=	$(wildcard src/kernel/string/*.c)
+ARCH_SRCS 	=	$(wildcard src/kernel/arch/x86_64/*.c)
 DRV_SRCS 	=	$(wildcard src/kernel/drivers/*.c)
-CPU_SRCS 	=	$(wildcard src/cpu/*.c)
-COMMAND_SRCS =  $(wildcard src/kernel/commands/*.c)
-PMM_SRCS 	=	$(wildcard src/kernel/pmm/*.c)
-VMM_SRCS    =   $(wildcard src/kernel/vmm/*.c)
-SYSCALL_SRCS=	$(wildcard src/kernel/syscall/*.c)
+FS_SRCS 	=	$(wildcard src/kernel/fs/*.c)
+NET_SRCS 	=	$(wildcard src/kernel/net/*.c)
+SYS_SRCS 	=	$(wildcard src/kernel/sys/*.c)
 APPS_SRCS   =   $(wildcard src/kernel/apps/*.c)
+CPU_SRCS 	=	$(wildcard src/cpu/*.c)
+PMM_SRCS 	=	$(wildcard src/kernel/pmm/*.c)
+VMM_SRCS 	=	$(wildcard src/kernel/vmm/*.c)
+STRING_SRCS =	$(wildcard src/kernel/string/*.c)
+SYSCALL_SRCS =	$(wildcard src/kernel/syscall/*.c)
+COMMANDS_SRCS =	$(wildcard src/kernel/commands/*.c)
+TTY_SRCS 	=	$(wildcard src/kernel/tty/*.c)
 
 ASM_PATH 		= 	src/bootloader/%.asm
 KERNEL_PATH 	= 	src/kernel/%.c
-TTY_PATH 		= 	src/kernel/tty/%.c
-STR_PATH 		= 	src/kernel/string/%.c
+ARCH_PATH 		= 	src/kernel/arch/x86_64/%.c
 DRV_PATH 		= 	src/kernel/drivers/%.c
+FS_PATH 		= 	src/kernel/fs/%.c
+NET_PATH 		= 	src/kernel/net/%.c
+SYS_PATH 		= 	src/kernel/sys/%.c
+APPS_PATH      =   src/kernel/apps/%.c
 CPU_PATH 		= 	src/cpu/%.c
-COMMAND_PATH 	= 	src/kernel/commands/%.c
 PMM_PATH 		= 	src/kernel/pmm/%.c
 VMM_PATH 		= 	src/kernel/vmm/%.c
+STRING_PATH 	= 	src/kernel/string/%.c
 SYSCALL_PATH 	= 	src/kernel/syscall/%.c
-APPS_PATH      =   src/kernel/apps/%.c
+COMMANDS_PATH 	= 	src/kernel/commands/%.c
+TTY_PATH 		= 	src/kernel/tty/%.c
 OBJ_PATH 		= 	obj/%.o
 
 ASM_OBJS 		= 	$(patsubst $(ASM_PATH), $(OBJ_PATH), $(ASM_SRCS))
-ASMS64_OBJS 	= 	$(patsubst src/kernel/%.S, $(OBJ_PATH), $(ASMS64_SRCS))
+ASMS64_OBJS 	= 	$(patsubst src/kernel/arch/x86_64/%.S, $(OBJ_PATH), $(ASMS64_SRCS))
 KERNEL_OBJS 	= 	$(patsubst $(KERNEL_PATH), $(OBJ_PATH), $(KERNEL_SRCS))
-TTY_OBJS 		= 	$(patsubst $(TTY_PATH), $(OBJ_PATH), $(TTY_SRCS))
-STR_OBJS 		= 	$(patsubst $(STR_PATH), $(OBJ_PATH), $(STR_SRCS))
+ARCH_OBJS 		= 	$(patsubst $(ARCH_PATH), $(OBJ_PATH), $(ARCH_SRCS))
 DRV_OBJS 		= 	$(patsubst $(DRV_PATH), $(OBJ_PATH), $(DRV_SRCS))
+FS_OBJS 		= 	$(patsubst $(FS_PATH), $(OBJ_PATH), $(FS_SRCS))
+NET_OBJS 		= 	$(patsubst $(NET_PATH), $(OBJ_PATH), $(NET_SRCS))
+SYS_OBJS 		= 	$(patsubst $(SYS_PATH), $(OBJ_PATH), $(SYS_SRCS))
+APPS_OBJS      =   $(patsubst $(APPS_PATH), $(OBJ_PATH), $(APPS_SRCS))
 CPU_OBJS 		= 	$(patsubst $(CPU_PATH), $(OBJ_PATH), $(CPU_SRCS))
-COMMAND_OBJS 	= 	$(patsubst $(COMMAND_PATH), $(OBJ_PATH), $(COMMAND_SRCS))
 PMM_OBJS 		= 	$(patsubst $(PMM_PATH), $(OBJ_PATH), $(PMM_SRCS))
 VMM_OBJS 		= 	$(patsubst $(VMM_PATH), $(OBJ_PATH), $(VMM_SRCS))
+STRING_OBJS 	= 	$(patsubst $(STRING_PATH), $(OBJ_PATH), $(STRING_SRCS))
 SYSCALL_OBJS 	= 	$(patsubst $(SYSCALL_PATH), $(OBJ_PATH), $(SYSCALL_SRCS))
-APPS_OBJS      =   $(patsubst $(APPS_PATH), $(OBJ_PATH), $(APPS_SRCS))
+COMMANDS_OBJS 	= 	$(patsubst $(COMMANDS_PATH), $(OBJ_PATH), $(COMMANDS_SRCS))
+TTY_OBJS 		= 	$(patsubst $(TTY_PATH), $(OBJ_PATH), $(TTY_SRCS))
 
-OBJS 		= 	$(ASM_OBJS) $(ASMS64_OBJS) $(KERNEL_OBJS) $(TTY_OBJS) $(STR_OBJS) $(DRV_OBJS) $(CPU_OBJS) $(COMMAND_OBJS) $(PMM_OBJS) $(VMM_OBJS) $(SYSCALL_OBJS) $(APPS_OBJS)
+OBJS 		= 	$(ASM_OBJS) $(ASMS64_OBJS) $(KERNEL_OBJS) $(ARCH_OBJS) $(DRV_OBJS) $(FS_OBJS) $(NET_OBJS) $(SYS_OBJS) $(APPS_OBJS) $(CPU_OBJS) $(PMM_OBJS) $(VMM_OBJS) $(STRING_OBJS) $(SYSCALL_OBJS) $(COMMANDS_OBJS) $(TTY_OBJS)
 
 NAME 		= 	DanOs
 BIN 		= 	target/x86_64/iso/boot/kernel.bin
@@ -48,7 +60,7 @@ ISO_TARGET 	= 	target/x86_64/iso
 BUILD 		= 	build/x86_64
 DISK_IMG 	= 	disk.img
 TRASH 		= 	obj build $(BIN)
-INCLUDE 	= 	src/kernel/includes
+INCLUDE 	= 	include
 
 MK 			= 	mkdir -p
 CC 			= 	x86_64-elf-gcc -ffreestanding -I $(INCLUDE)
@@ -60,29 +72,37 @@ RM 			= 	rm -rf
 .PHONY: all
 all: build
 
-$(STR_OBJS): $(OBJ_PATH): $(STR_PATH)
-	@ $(MK) $(dir $@) && \
-	$(CC) -c $(patsubst $(OBJ_PATH), $(STR_PATH), $@) -o $@
-
 $(KERNEL_OBJS): $(OBJ_PATH): $(KERNEL_PATH)
 	@ $(MK) $(dir $@) && \
 	$(CC) -c $(patsubst $(OBJ_PATH), $(KERNEL_PATH), $@) -o $@
 
-$(TTY_OBJS): $(OBJ_PATH): $(TTY_PATH)
+$(ARCH_OBJS): $(OBJ_PATH): $(ARCH_PATH)
 	@ $(MK) $(dir $@) && \
-	$(CC) -c $(patsubst $(OBJ_PATH), $(TTY_PATH), $@) -o $@
+	$(CC) -c $(patsubst $(OBJ_PATH), $(ARCH_PATH), $@) -o $@
 
 $(DRV_OBJS): $(OBJ_PATH): $(DRV_PATH)
 	@ $(MK) $(dir $@) && \
 	$(CC) -c $(patsubst $(OBJ_PATH), $(DRV_PATH), $@) -o $@
 
+$(FS_OBJS): $(OBJ_PATH): $(FS_PATH)
+	@ $(MK) $(dir $@) && \
+	$(CC) -c $(patsubst $(OBJ_PATH), $(FS_PATH), $@) -o $@
+
+$(NET_OBJS): $(OBJ_PATH): $(NET_PATH)
+	@ $(MK) $(dir $@) && \
+	$(CC) -c $(patsubst $(OBJ_PATH), $(NET_PATH), $@) -o $@
+
+$(SYS_OBJS): $(OBJ_PATH): $(SYS_PATH)
+	@ $(MK) $(dir $@) && \
+	$(CC) -c $(patsubst $(OBJ_PATH), $(SYS_PATH), $@) -o $@
+
+$(APPS_OBJS): $(OBJ_PATH): $(APPS_PATH)
+	@ $(MK) $(dir $@) && \
+	$(CC) -c $(patsubst $(OBJ_PATH), $(APPS_PATH), $@) -o $@
+
 $(CPU_OBJS): $(OBJ_PATH): $(CPU_PATH)
 	@ $(MK) $(dir $@) && \
 	$(CC) -c $(patsubst $(OBJ_PATH), $(CPU_PATH), $@) -o $@
-
-$(COMMAND_OBJS): $(OBJ_PATH): $(COMMAND_PATH)
-	@ $(MK) $(dir $@) && \
-	$(CC) -c $(patsubst $(OBJ_PATH), $(COMMAND_PATH), $@) -o $@
 
 $(PMM_OBJS): $(OBJ_PATH): $(PMM_PATH)
 	@ $(MK) $(dir $@) && \
@@ -92,21 +112,29 @@ $(VMM_OBJS): $(OBJ_PATH): $(VMM_PATH)
 	@ $(MK) $(dir $@) && \
 	$(CC) -c $(patsubst $(OBJ_PATH), $(VMM_PATH), $@) -o $@
 
+$(STRING_OBJS): $(OBJ_PATH): $(STRING_PATH)
+	@ $(MK) $(dir $@) && \
+	$(CC) -c $(patsubst $(OBJ_PATH), $(STRING_PATH), $@) -o $@
+
 $(SYSCALL_OBJS): $(OBJ_PATH): $(SYSCALL_PATH)
 	@ $(MK) $(dir $@) && \
 	$(CC) -c $(patsubst $(OBJ_PATH), $(SYSCALL_PATH), $@) -o $@
 
-$(APPS_OBJS): $(OBJ_PATH): $(APPS_PATH)
+$(COMMANDS_OBJS): $(OBJ_PATH): $(COMMANDS_PATH)
 	@ $(MK) $(dir $@) && \
-	$(CC) -c $(patsubst $(OBJ_PATH), $(APPS_PATH), $@) -o $@
+	$(CC) -c $(patsubst $(OBJ_PATH), $(COMMANDS_PATH), $@) -o $@
+
+$(TTY_OBJS): $(OBJ_PATH): $(TTY_PATH)
+	@ $(MK) $(dir $@) && \
+	$(CC) -c $(patsubst $(OBJ_PATH), $(TTY_PATH), $@) -o $@
 
 $(ASM_OBJS): $(OBJ_PATH): $(ASM_PATH)
 	@ $(MK) $(dir $@) && \
 	$(NASM) $(patsubst $(OBJ_PATH), $(ASM_PATH), $@) -o $@
 
-$(ASMS64_OBJS): $(OBJ_PATH): src/kernel/%.S
+$(ASMS64_OBJS): $(OBJ_PATH): src/kernel/arch/x86_64/%.S
 	@ $(MK) $(dir $@) && \
-	$(CC) -c src/kernel/$*.S -o $@
+	$(CC) -c src/kernel/arch/x86_64/$*.S -o $@
 
 build: $(OBJS)
 	@ $(MK) $(BUILD) && \

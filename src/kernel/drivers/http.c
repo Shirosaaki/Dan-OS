@@ -2,14 +2,14 @@
 // HTTP Client Implementation
 //
 
-#include "http.h"
-#include "tcp.h"
-#include "tls.h"
-#include "dns.h"
-#include "net.h"
-#include "e1000.h"
-#include "tty.h"
-#include "string.h"
+#include <kernel/net/http.h>
+#include <kernel/net/tcp.h>
+#include <kernel/net/tls.h>
+#include <kernel/net/dns.h>
+#include <kernel/net/net.h>
+#include <kernel/drivers/e1000.h>
+#include <kernel/sys/tty.h>
+#include <kernel/sys/string.h>
 #include <stddef.h>
 
 // =============================================================================

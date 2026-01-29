@@ -7,7 +7,7 @@
 // A set bit (1) means foreground color, cleared bit (0) means background.
 //
 
-#include "font8x16.h"
+#include <kernel/drivers/font8x16.h>
 
 // Font data for characters 32-127 (space through tilde, plus DEL placeholder)
 // This is a simplified CP437/VGA-style font suitable for OS development

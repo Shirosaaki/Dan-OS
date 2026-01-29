@@ -2,11 +2,11 @@
 // XHCI (USB 3.0) Controller Driver Implementation
 //
 
-#include "../includes/xhci.h"
-#include "../includes/pci.h"
-#include "../includes/usb.h"
-#include "../includes/tty.h"
-#include "../includes/kmalloc.h"
+#include <kernel/drivers/xhci.h>
+#include <kernel/drivers/pci.h>
+#include <kernel/drivers/usb.h>
+#include <kernel/sys/tty.h>
+#include <kernel/sys/kmalloc.h>
 
 // Forward declarations
 static int xhci_init_controller(usb_controller_t* ctrl);

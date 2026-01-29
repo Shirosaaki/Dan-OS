@@ -3,10 +3,10 @@
 // Basic Ethernet, ARP, IPv4, ICMP, UDP support
 //
 
-#include "net.h"
-#include "tcp.h"
-#include "tty.h"
-#include "string.h"
+#include <kernel/net/net.h>
+#include <kernel/net/tcp.h>
+#include <kernel/sys/tty.h>
+#include <kernel/sys/string.h>
 #include <stddef.h>
 
 // =============================================================================

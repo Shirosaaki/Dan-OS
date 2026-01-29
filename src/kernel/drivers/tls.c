@@ -3,10 +3,10 @@
 // Supports RSA key exchange with AES-128-CBC-SHA256 or AES-128-GCM-SHA256
 //
 
-#include "tls.h"
-#include "tcp.h"
-#include "e1000.h"
-#include "tty.h"
+#include <kernel/net/tls.h>
+#include <kernel/net/tcp.h>
+#include <kernel/drivers/e1000.h>
+#include <kernel/sys/tty.h>
 
 // PRF (Pseudo-Random Function) for TLS 1.2 using HMAC-SHA256
 static void tls_prf_sha256(const uint8_t* secret, size_t secret_len,

@@ -2,12 +2,12 @@
 // Created by Shirosaaki on 02/10/2025.
 //
 
-#include "fat32.h"
-#include "ata.h"
-#include "tty.h"
-#include "string.h"
-#include "rtc.h"
-#include "kmalloc.h"
+#include <kernel/fs/fat32.h>
+#include <kernel/drivers/ata.h>
+#include <kernel/sys/tty.h>
+#include <kernel/sys/string.h>
+#include <kernel/drivers/rtc.h>
+#include <kernel/sys/kmalloc.h>
 
 static fat32_boot_sector_t boot_sector;
 static uint32_t fat_start_lba;

@@ -1,7 +1,10 @@
-// Migrated to arch/x86_64
-#include "idt.h"
-#include "tty.h"
-#include "../../cpu/ports.h"
+//
+// Created by Shirosaaki on 02/10/2025.
+//
+
+#include <kernel/arch/x86_64/idt.h>
+#include <kernel/sys/tty.h>
+#include <cpu/ports.h>
 
 // IDT entries and pointer
 static idt_entry_t idt[IDT_ENTRIES];
@@ -15,21 +18,32 @@ static idt_ptr_t idt_ptr;
 
 // PIC initialization
 void pic_remap(void) {
+    // Save masks
     uint8_t mask1 = inb(PIC1_DATA);
     uint8_t mask2 = inb(PIC2_DATA);
 
+    // Start initialization sequence
     outb(PIC1_COMMAND, 0x11);
     outb(PIC2_COMMAND, 0x11);
+    
+    // Set vector offsets (32-47)
     outb(PIC1_DATA, 32);
     outb(PIC2_DATA, 40);
+    
+    // Configure cascading
     outb(PIC1_DATA, 0x04);
     outb(PIC2_DATA, 0x02);
+    
+    // Set 8086 mode
     outb(PIC1_DATA, 0x01);
     outb(PIC2_DATA, 0x01);
+    
+    // Restore masks
     outb(PIC1_DATA, mask1);
     outb(PIC2_DATA, mask2);
 }
 
+// Set an IDT gate
 void idt_set_gate(uint8_t num, uint64_t handler, uint16_t selector, uint8_t flags) {
     idt[num].offset_low = handler & 0xFFFF;
     idt[num].selector = selector;
@@ -40,11 +54,15 @@ void idt_set_gate(uint8_t num, uint64_t handler, uint16_t selector, uint8_t flag
     idt[num].zero = 0;
 }
 
+// Load IDT (defined in assembly)
 extern void idt_load(uint64_t);
 
+// Initialize the IDT
 void idt_init(void) {
     idt_ptr.limit = sizeof(idt) - 1;
     idt_ptr.base = (uint64_t)&idt;
+
+    // Clear the IDT
     for (int i = 0; i < IDT_ENTRIES; i++) {
         idt[i].offset_low = 0;
         idt[i].selector = 0;
@@ -54,8 +72,11 @@ void idt_init(void) {
         idt[i].offset_high = 0;
         idt[i].zero = 0;
     }
+
+    // Remap PIC
     pic_remap();
 
+    // Install CPU exception handlers (ISRs)
     idt_set_gate(0, (uint64_t)isr0, 0x08, 0x8E);
     idt_set_gate(1, (uint64_t)isr1, 0x08, 0x8E);
     idt_set_gate(2, (uint64_t)isr2, 0x08, 0x8E);
@@ -89,6 +110,7 @@ void idt_init(void) {
     idt_set_gate(30, (uint64_t)isr30, 0x08, 0x8E);
     idt_set_gate(31, (uint64_t)isr31, 0x08, 0x8E);
 
+    // Install IRQ handlers (IRQs 0-15 mapped to interrupts 32-47)
     idt_set_gate(32, (uint64_t)irq0, 0x08, 0x8E);
     idt_set_gate(33, (uint64_t)irq1, 0x08, 0x8E);
     idt_set_gate(34, (uint64_t)irq2, 0x08, 0x8E);
@@ -106,17 +128,23 @@ void idt_init(void) {
     idt_set_gate(46, (uint64_t)irq14, 0x08, 0x8E);
     idt_set_gate(47, (uint64_t)irq15, 0x08, 0x8E);
 
+    // Load the IDT
     idt_load((uint64_t)&idt_ptr);
+
+    // Enable interrupts
     __asm__ volatile("sti");
 }
 
+// ISR handler
 void isr_handler(uint64_t int_no) {
     if (int_no == 14) {
         tty_putstr("Page fault (int 14) — halting.\n");
+        // Stop further interrupts to avoid flood while debugging
         __asm__ volatile("cli; hlt");
     }
 
     tty_putstr("Received interrupt: ");
+    // Simple number printing (for debugging)
     char num[3];
     num[0] = '0' + (int_no / 10);
     num[1] = '0' + (int_no % 10);
@@ -125,14 +153,22 @@ void isr_handler(uint64_t int_no) {
     tty_putstr("\n");
 }
 
+// External keyboard handler
 extern void keyboard_handler(void);
 
+// IRQ handler
 void irq_handler(uint64_t irq_no) {
+    // Handle specific IRQs
     if (irq_no == 33) {
+        // IRQ1 - Keyboard
         keyboard_handler();
     }
+    
+    // Send End of Interrupt (EOI) to PIC
     if (irq_no >= 40) {
+        // Send EOI to slave PIC
         outb(PIC2_COMMAND, 0x20);
     }
+    // Send EOI to master PIC
     outb(PIC1_COMMAND, 0x20);
 }

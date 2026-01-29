@@ -2,13 +2,13 @@
 // USB Core and HID Keyboard Driver Implementation
 //
 
-#include "../includes/usb.h"
-#include "../includes/pci.h"
-#include "../includes/uhci.h"
-#include "../includes/ehci.h"
-#include "../includes/xhci.h"
-#include "../includes/tty.h"
-#include "../includes/kmalloc.h"
+#include <kernel/drivers/usb.h>
+#include <kernel/drivers/pci.h>
+#include <kernel/drivers/uhci.h>
+#include <kernel/drivers/ehci.h>
+#include <kernel/drivers/xhci.h>
+#include <kernel/sys/tty.h>
+#include <kernel/sys/kmalloc.h>
 
 // USB Controllers
 #define MAX_USB_CONTROLLERS 8

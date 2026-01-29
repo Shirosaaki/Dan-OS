@@ -2,8 +2,8 @@
 // RSA Implementation
 //
 
-#include "rsa.h"
-#include "sha256.h"
+#include <kernel/drivers/rsa.h>
+#include <kernel/drivers/bigint.h>
 
 // Simple random bytes (NOT cryptographically secure - for demo only!)
 static uint8_t simple_random(void) {

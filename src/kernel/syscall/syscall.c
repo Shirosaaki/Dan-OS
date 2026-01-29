@@ -5,14 +5,14 @@
  *  Date: 2025-12-05
  *=============================================**/
 
-#include "syscall.h"
-#include "tty.h"
-#include "keyboard.h"
-#include "fat32.h"
-#include "kmalloc.h"
-#include "rtc.h"
-#include "scheduler.h"
-#include "string.h"
+#include <kernel/sys/syscall.h>
+#include <kernel/sys/tty.h>
+#include <kernel/drivers/keyboard.h>
+#include <kernel/fs/fat32.h>
+#include <kernel/sys/kmalloc.h>
+#include <kernel/drivers/rtc.h>
+#include <kernel/sys/scheduler.h>
+#include <kernel/sys/string.h>
 
 // File descriptor table
 static file_descriptor_t fd_table[MAX_OPEN_FILES];

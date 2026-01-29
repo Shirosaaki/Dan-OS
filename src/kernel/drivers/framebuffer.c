@@ -3,8 +3,8 @@
 // Software text rendering on a linear framebuffer
 //
 
-#include "framebuffer.h"
-#include "font8x16.h"
+#include <kernel/drivers/framebuffer.h>
+#include <kernel/drivers/font8x16.h>
 #include <stddef.h>
 
 // =============================================================================

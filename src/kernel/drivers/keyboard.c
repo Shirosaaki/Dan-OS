@@ -2,8 +2,8 @@
 // Created by Shirosaaki on 02/10/2025.
 //
 
-#include "keyboard.h"
-#include "tty.h"
+#include <kernel/drivers/keyboard.h>
+#include <kernel/sys/tty.h>
 #include "../../cpu/ports.h"
 
 // Scancode to ASCII table (US QWERTY layout)
@@ -406,7 +406,7 @@ void keyboard_handler(void) {
             if (capture_mode) return;
             
             // Check if in editor mode
-            #include "tty.h"
+            #include <kernel/sys/tty.h>
             if (tty_is_editor_mode()) {
                 // In editor mode - handle differently
                 if (c == '\b') {
