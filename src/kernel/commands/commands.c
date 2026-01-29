@@ -20,6 +20,7 @@ extern uint8_t tty_color;
 extern char cmd_buffer[];
 extern int cmd_buffer_pos;
 extern int cmd_cursor_pos;
+extern void cmd_vm(const char* filename);
 
 void tty_process_command(void) {
     cmd_buffer[cmd_buffer_pos] = '\0'; // Null terminate
@@ -876,6 +877,25 @@ void tty_process_command(void) {
             tty_putstr("Polling network...\n");
             e1000_poll();
             tty_putstr("Done.\n");
+        } else if (strncmp(cmd_buffer, "vm ", 3) == 0) {
+            char filename[32];
+            int j = 0;
+            int i = 3;
+            
+            // Skip spaces
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] == ' ') i++;
+            
+            // Get filename
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] != ' ' && j < 31) {
+                filename[j++] = cmd_buffer[i++];
+            }
+            filename[j] = '\0';
+            
+            if (filename[0] == '\0') {
+                tty_putstr("Usage: vm <payload.bin>\n");
+            } else {
+                cmd_vm(filename);
+            }
         } else {
             tty_putstr("Unknown command: ");
             tty_putstr(cmd_buffer);

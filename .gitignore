@@ -4,3 +4,5 @@ kernel.bin
 .clang-format
 build/
 obj/
+payload*
+tmp

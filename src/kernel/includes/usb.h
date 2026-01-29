@@ -237,7 +237,7 @@ typedef struct {
 // USB Controller structure
 typedef struct usb_controller {
     int type;               // UHCI, OHCI, EHCI, XHCI
-    void* base;             // Memory-mapped or I/O base
+    volatile void* base;    // Memory-mapped or I/O base
     uint32_t io_base;       // I/O port base (for UHCI)
     uint8_t irq;
     usb_controller_ops_t* ops;

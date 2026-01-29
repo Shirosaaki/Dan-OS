@@ -333,7 +333,7 @@ int ehci_init(usb_controller_t* ctrl, pci_device_t* pci_dev) {
     
     // Store EHCI data in controller
     ctrl->driver_data = ehci;
-    ctrl->base = ehci->mmio_base;
+    ctrl->base = (void*)ehci->mmio_base;
     ctrl->type = USB_CONTROLLER_EHCI;
     ctrl->ops = &ehci_ops;
     ctrl->irq = pci_dev->irq;
@@ -452,7 +452,7 @@ static uint32_t ehci_make_ep_char(usb_device_t* dev, uint8_t endpoint, uint16_t 
 }
 
 // Build a qTD
-static void ehci_build_qtd(ehci_qtd_t* qtd, uint8_t pid, void* buffer, 
+static void ehci_build_qtd(ehci_qtd_t* qtd, uint32_t pid, void* buffer, 
                            uint32_t length, uint8_t toggle, int ioc) {
     qtd->token = EHCI_QTD_STATUS_ACTIVE | (3 << 10); // Active, 3 error retries
     qtd->token |= pid;
@@ -533,7 +533,7 @@ static int ehci_control_transfer(usb_device_t* dev, usb_setup_packet_t* setup,
             return USB_TRANSFER_ERROR;
         }
         
-        uint8_t pid = (setup->bmRequestType & USB_REQ_DIR_IN) ? 
+        uint32_t pid = (setup->bmRequestType & USB_REQ_DIR_IN) ? 
                       EHCI_QTD_PID_IN : EHCI_QTD_PID_OUT;
         ehci_build_qtd(qtd_data, pid, data, length, toggle, 0);
         

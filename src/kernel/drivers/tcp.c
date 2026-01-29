@@ -52,16 +52,17 @@ static uint16_t tcp_checksum(uint32_t src_ip, uint32_t dst_ip,
     sum += htons(tcp_len);
     
     // TCP header + data
-    const uint16_t* ptr = (const uint16_t*)tcp;
+    const uint8_t* ptr = (const uint8_t*)tcp;
     size_t len = tcp_len;
     
     while (len > 1) {
-        sum += *ptr++;
+        sum += (ptr[0] << 8) | ptr[1];
+        ptr += 2;
         len -= 2;
     }
     
     if (len == 1) {
-        sum += *(const uint8_t*)ptr;
+        sum += *ptr;
     }
     
     // Fold 32-bit sum to 16 bits

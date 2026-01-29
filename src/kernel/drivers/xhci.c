@@ -464,7 +464,7 @@ int xhci_init(usb_controller_t* ctrl, pci_device_t* pci_dev) {
     
     // Store in controller
     ctrl->driver_data = xhci;
-    ctrl->base = xhci->mmio_base;
+    ctrl->base = (void*)xhci->mmio_base;
     ctrl->type = USB_CONTROLLER_XHCI;
     ctrl->ops = &xhci_ops;
     ctrl->irq = pci_dev->irq;
