@@ -8,9 +8,10 @@
 #include "kmalloc.h"
 #include "fat32.h"
 #include "string.h"
+#include "scheduler.h"
 
 // Configuration
-#define RAM_SIZE 0x1000 // 4KB
+#define RAM_SIZE 0x8000 // 32KB
 
 // --- Utils ---
 void vm_err(const char *msg) {
@@ -30,6 +31,7 @@ int vm_init(vm_t *vm) {
     vm->ram = (uint8_t*)kmalloc(RAM_SIZE);
     if (!vm->ram) { vm_err("Alloc RAM failed"); return -1; }
     memset_k(vm->ram, 0, RAM_SIZE);
+    vm->ram_size = RAM_SIZE;
 
     // 3. Map RAM
     struct kvm_userspace_memory_region region = {
@@ -99,7 +101,7 @@ int vcpu_init(vm_t *vm) {
     
     struct kvm_regs regs = {
         .rip = 0,
-        .rsp = 0x1000,
+        .rsp = 0x7000,  // Match payload's stack
         .rflags = 0x2 | (1 << 9),
     };
 
@@ -112,7 +114,7 @@ int vcpu_init(vm_t *vm) {
     vm->cpu.ds = 0;
     vm->cpu.es = 0;
     vm->cpu.ss = 0;
-    vm->cpu.sp = 0x1000;
+    vm->cpu.sp = 0x7000; // match payload's stack (SS=0, SP=0x7000)
     vm->cpu.ax = 0;
     vm->cpu.bx = 0;
     vm->cpu.cx = 0;
@@ -138,8 +140,8 @@ void vcpu_run(vm_t *vm) {
 
         switch (vm->run->exit_reason) {
             case KVM_EXIT_IO: {
-                if (vm->run->io.port == 0x10 && vm->run->io.direction == KVM_EXIT_IO_OUT) {
-                    // Safe now because kvm_run is 4096 bytes
+                if (vm->run->io.direction == KVM_EXIT_IO_OUT && vm->run->io.port == 0x10) {
+                    // Output to host
                     uint8_t *data = (uint8_t *)vm->run + vm->run->io.data_offset;
                     uint32_t size = vm->run->io.size;
                     uint32_t count = vm->run->io.count;
@@ -147,10 +149,11 @@ void vcpu_run(vm_t *vm) {
                     for (uint32_t t = 0; t < count; ++t) {
                         uint8_t *transfer = data + t * size;
                         for (uint32_t b = 0; b < size; ++b) {
-                            tty_putchar((char)transfer[b]); 
+                            char c = (char)transfer[b];
+                            tty_putchar(c);
                         }
                     }
-                } 
+                }
                 break;
             }
 
@@ -170,38 +173,115 @@ void vcpu_run(vm_t *vm) {
 // --- Main Command Entry ---
 vm_t *current_vm = NULL;
 
-void cmd_vm(const char* filename) {
-    vm_t vm;
-    current_vm = &vm;
-    
-    // SAFETY: Initialize pointer to NULL so we don't double free if init fails
-    vm.ram = (void*)0; 
+// Task runner uses this buffer to receive filename when launched from IRQ context
+static char vm_task_filename[256];
 
-    tty_putstr("Starting DanOS VMM...\n");
+static void vm_task(void) {
+    vm_t vm;
+    const char *filename = vm_task_filename;
+    vm_task_impl(&vm, filename);
     
-    if (vm_init(&vm) != 0) {
-        if (vm.ram) kfree(vm.ram); // Cleanup if partial fail
-        return;
+    // --- FIX: Prevent return off the end of the stack ---
+    tty_putstr("VM Task Finished. Halting thread.\n");
+    while(1) {
+        __asm__ volatile("hlt");
     }
+}
+
+void vm_task_direct_run(const char *filename) {
+    vm_t vm;
+    vm_task_impl(&vm, filename);
+}
+
+int vm_probe(const char *filename) {
+    vm_t vm;
+    vm.ram = (void*)0;
+    tty_putstr("[VM PROBE] start\n");
+
+    if (vm_init(&vm) != 0) {
+        tty_putstr("[VM PROBE] vm_init failed\n");
+        if (vm.ram) kfree(vm.ram);
+        return -1;
+    }
+    tty_putstr("[VM PROBE] vm_init ok\n");
 
     if (vm_load_image(&vm, filename) != 0) {
-        kfree(vm.ram);
-        return;
+        tty_putstr("[VM PROBE] vm_load_image failed\n");
+        if (vm.ram) kfree(vm.ram);
+        return -1;
     }
-    
-    if (vcpu_init(&vm) != 0) {
-        kfree(vm.ram);
-        return;
-    }
+    tty_putstr("[VM PROBE] vm_load_image ok\n");
 
-    vcpu_run(&vm);
-    
-    // Cleanup
+    if (vcpu_init(&vm) != 0) {
+        tty_putstr("[VM PROBE] vcpu_init failed\n");
+        if (vm.ram) kfree(vm.ram);
+        return -1;
+    }
+    tty_putstr("[VM PROBE] vcpu_init ok\n");
+
     if (vm.ram) kfree(vm.ram);
-    
-    // NOTE: In a real implementation, you should also free vm->run 
-    // but current_run in kvm_stub is static/globalish so we leave it for now
-    // or add a danos_kvm_destroy_vcpu function.
-    
+    tty_putstr("[VM PROBE] all good\n");
+    return 0;
+}
+
+void vm_task_impl(vm_t *vm, const char *filename) {
+    current_vm = vm;
+
+    // SAFETY: Initialize pointer to NULL so we don't double free if init fails
+    vm->ram = (void*)0;
+
+    tty_putstr("Starting DanOS VMM...\n");
+    tty_putstr("[VM TASK] before vm_init\n");
+    // Capture keyboard so TTY doesn't steal keys
+    keyboard_set_capture(1);
+
+    if (vm_init(vm) != 0) {
+        if (vm->ram) kfree(vm->ram);
+        tty_putstr("[VM TASK] vm_init failed\n");
+        return;
+    }
+    tty_putstr("[VM TASK] vm_init ok\n");
+
+    if (vm_load_image(vm, filename) != 0) {
+        if (vm->ram) kfree(vm->ram);
+        tty_putstr("[VM TASK] vm_load_image failed\n");
+        return;
+    }
+    tty_putstr("[VM TASK] vm_load_image ok\n");
+
+    if (vcpu_init(vm) != 0) {
+        if (vm->ram) kfree(vm->ram);
+        tty_putstr("[VM TASK] vcpu_init failed\n");
+        return;
+    }
+    tty_putstr("[VM TASK] vcpu_init ok\n");
+
+    tty_putstr("[VM TASK] entering vcpu_run\n");
+    vcpu_run(vm);
+
+    // Cleanup
+    if (vm->ram) kfree(vm->ram);
+    // Release keyboard capture
+    keyboard_set_capture(0);
+
     tty_putstr("VM Terminated.\n");
+}
+
+void cmd_vm(const char* filename) {
+    // Copy filename to task buffer and schedule the VM task so it runs
+    // outside of IRQ context (tty_process_command may be called from IRQ)
+    int i;
+    for (i = 0; i < 255 && filename[i]; ++i) vm_task_filename[i] = filename[i];
+    vm_task_filename[i] = '\0';
+    // Schedule task
+    int rc = scheduler_add_task(vm_task);
+    if (rc == 0) {
+        tty_putstr("VM scheduled as kernel task.\n");
+    } else {
+        tty_putstr("Failed to schedule VM (rc=");
+        tty_putdec(rc);
+        tty_putstr("). Running synchronously for debug...\n");
+        /* Run directly for debugging (may be unsafe in IRQ contexts) */
+        vm_task();
+    }
 }

@@ -7,6 +7,7 @@
 #include "tty.h"
 #include "string.h"
 #include "rtc.h"
+#include "kmalloc.h"
 
 static fat32_boot_sector_t boot_sector;
 static uint32_t fat_start_lba;
@@ -500,28 +501,32 @@ int fat32_read_file(fat32_file_t* file, uint8_t* buffer, uint32_t size) {
     uint32_t bytes_read = 0;
     uint32_t cluster_size = boot_sector.sectors_per_cluster * 512;
     
+    // --- FIX START ---
+    // Allocate on Heap instead of Stack
+    uint8_t* cluster_buffer = (uint8_t*)kmalloc(cluster_size);
+    if (!cluster_buffer) {
+        tty_putstr("FAT32: Out of memory\n");
+        return -1;
+    }
+    // --- FIX END ---
+
     while (bytes_read < size && file->current_pos < file->file_size) {
         uint32_t lba = fat32_cluster_to_lba(file->current_cluster);
         uint32_t offset_in_cluster = file->current_pos % cluster_size;
         uint32_t bytes_to_read = cluster_size - offset_in_cluster;
         
-        if (bytes_to_read > size - bytes_read) {
-            bytes_to_read = size - bytes_read;
-        }
-        
-        if (bytes_to_read > file->file_size - file->current_pos) {
-            bytes_to_read = file->file_size - file->current_pos;
-        }
+        if (bytes_to_read > size - bytes_read) bytes_to_read = size - bytes_read;
+        if (bytes_to_read > file->file_size - file->current_pos) bytes_to_read = file->file_size - file->current_pos;
         
         // Read cluster
-        uint8_t cluster_buffer[cluster_size];
         for (uint32_t i = 0; i < boot_sector.sectors_per_cluster; i++) {
             if (ata_read_sectors(lba + i, 1, (uint16_t*)(cluster_buffer + i * 512)) != 0) {
+                kfree(cluster_buffer); // Free on error
                 return bytes_read;
             }
         }
         
-        // Copy data to buffer
+        // Copy data
         for (uint32_t i = 0; i < bytes_to_read; i++) {
             buffer[bytes_read + i] = cluster_buffer[offset_in_cluster + i];
         }
@@ -529,15 +534,13 @@ int fat32_read_file(fat32_file_t* file, uint8_t* buffer, uint32_t size) {
         bytes_read += bytes_to_read;
         file->current_pos += bytes_to_read;
         
-        // Check if we need to move to next cluster
         if (file->current_pos % cluster_size == 0 && file->current_pos < file->file_size) {
             file->current_cluster = fat32_get_next_cluster(file->current_cluster);
-            if (file->current_cluster >= FAT32_EOC) {
-                break;
-            }
+            if (file->current_cluster >= FAT32_EOC) break;
         }
     }
     
+    kfree(cluster_buffer); // Free memory
     return bytes_read;
 }
 

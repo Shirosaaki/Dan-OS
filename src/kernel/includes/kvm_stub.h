@@ -78,6 +78,9 @@ struct kvm_run {
             uint8_t  is_write;
         } mmio;
     };
+    /* Data area for exits that need to transfer data (emulator uses this).
+       Ensures there's room to write IO bytes safely. */
+    uint8_t data[256];
 };
 
 struct kvm_userspace_memory_region {
@@ -93,6 +96,7 @@ struct vm {
     int vm_fd;
     int vcpu_fd;
     uint8_t *ram;
+    int ram_size;
     struct kvm_run *run;
     struct {
         uint16_t ax, bx, cx, dx, si, di, sp, bp;

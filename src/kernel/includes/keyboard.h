@@ -20,6 +20,15 @@ char keyboard_getchar(void);
 // Check if a key is available
 int keyboard_has_key(void);
 
+// Peek next key without consuming it (0 if none)
+char keyboard_peek(void);
+
+// Consume one key (after a successful peek)
+void keyboard_consume(void);
+
+// Capture keyboard input (when non-zero, keyboard handler will not forward keys to TTY)
+void keyboard_set_capture(int enable);
+int keyboard_get_capture(void);
 // Numpad support:
 // - Numpad 0-9: numeric input when NumLock is on
 // - Numpad +, -, *, /: arithmetic operators

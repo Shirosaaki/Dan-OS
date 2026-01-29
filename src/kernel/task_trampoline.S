@@ -10,10 +10,20 @@ task_start_wrapper:
     # At this point, rdi contains the thread function pointer (we set it in the saved register area).
     push rbp
     mov rbp, rsp
-    # Call the function in rdi
-    mov rax, rdi
+    # Save the function pointer (rdi) in a callee-saved register before calling helpers
+    mov r12, rdi
+    # Print a debug message so we know the task started
+    lea rdi, [rip + .Ltask_start_msg]
+    call tty_putstr
+    # Call the function using r12 (restores original pointer)
+    mov rax, r12
     call rax
     # If it returns, just halt
 1:  hlt
     jmp 1b
+
+    .section .rodata
+.Ltask_start_msg:
+    .ascii "[TASK] start\n\0"
+    .text
     .att_syntax

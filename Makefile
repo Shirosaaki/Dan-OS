@@ -57,6 +57,9 @@ LD 			= 	x86_64-elf-ld -n -o $(BIN) -T $(LINKER) $(OBJS)
 GRUB 		= 	grub-mkrescue /usr/lib/grub/i386-pc -o $(ISO) $(ISO_TARGET)
 RM 			= 	rm -rf
 
+.PHONY: all
+all: build
+
 $(STR_OBJS): $(OBJ_PATH): $(STR_PATH)
 	@ $(MK) $(dir $@) && \
 	$(CC) -c $(patsubst $(OBJ_PATH), $(STR_PATH), $@) -o $@
@@ -105,7 +108,6 @@ $(ASMS64_OBJS): $(OBJ_PATH): src/kernel/%.S
 	@ $(MK) $(dir $@) && \
 	$(CC) -c src/kernel/$*.S -o $@
 
-.PHONY: build
 build: $(OBJS)
 	@ $(MK) $(BUILD) && \
 	$(LD) && \

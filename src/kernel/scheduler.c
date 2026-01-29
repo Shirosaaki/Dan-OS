@@ -40,10 +40,15 @@ static void *alloc_stack(void) {
 int scheduler_add_task(void (*func)(void)) {
     // allocate task struct from kmalloc (or simple static pool)
     task_struct_t *t = (task_struct_t *)kmalloc(sizeof(task_struct_t));
-    if (!t) return -1;
+    if (!t) {
+        return -1;
+    }
     for (size_t i = 0; i < sizeof(task_struct_t); ++i) ((char*)t)[i] = 0;
     void *stack = alloc_stack();
-    if (!stack) return -1;
+    if (!stack) {
+        tty_putstr("[SCHED] alloc_stack failed\n");
+        return -1;
+    }
     t->stack_base = stack;
     // Build initial stack frame such that iretq will return into the function
     // But simpler: we will craft a context with saved registers and return into a small trampoline that calls the function.
@@ -70,6 +75,9 @@ int scheduler_add_task(void (*func)(void)) {
     sp[19] = 0x202; // RFLAGS with interrupts enabled
 
     t->rsp = (uint64_t)sp;
+    tty_putstr("[SCHED] task rsp=0x");
+    tty_puthex64(t->rsp);
+    tty_putstr("\n");
     t->cr3 = vmm_get_cr3();
     t->state = TASK_RUNNABLE;
 

@@ -84,6 +84,8 @@ static int extended_scancode = 0; // Flag for 0xE0 prefix
 static char keyboard_buffer[KEYBOARD_BUFFER_SIZE];
 static int buffer_read = 0;
 static int buffer_write = 0;
+// When capture_mode is non-zero, the keyboard handler will NOT forward keys to TTY
+static int capture_mode = 0;
 
 // Initialize the keyboard
 void keyboard_init(void) {
@@ -282,32 +284,41 @@ void keyboard_handler(void) {
     // Handle extended scancodes (0xE0 prefix)
     if (extended_scancode) {
         extended_scancode = 0; // Reset flag
+        int forward = !capture_mode; // if capture_mode is enabled, do not forward to TTY
 
         // Arrow keys (E0 48/50/4B/4D)
         if (scancode == 0x48) {
             // Up arrow - show previous command in history (when not in editor)
-            if (!tty_is_editor_mode()) {
-                tty_history_up();
+            if (forward) {
+                if (!tty_is_editor_mode()) {
+                    tty_history_up();
+                } else {
+                    tty_cursor_up();
+                }
             } else {
-                tty_cursor_up();
+                // still buffer the key for the VM
+                keyboard_buffer_add(0); // placeholder - VM expects arrow via extended handling
             }
             return;
         }
         if (scancode == 0x50) {
-            // Down arrow - show next command in history (when not in editor)
-            if (!tty_is_editor_mode()) {
-                tty_history_down();
+            if (forward) {
+                if (!tty_is_editor_mode()) {
+                    tty_history_down();
+                } else {
+                    tty_cursor_down();
+                }
             } else {
-                tty_cursor_down();
+                keyboard_buffer_add(0);
             }
             return;
         }
         if (scancode == 0x4B) {
-            tty_cursor_left();
+            if (forward) tty_cursor_left(); else keyboard_buffer_add(0);
             return;
         }
         if (scancode == 0x4D) {
-            tty_cursor_right();
+            if (forward) tty_cursor_right(); else keyboard_buffer_add(0);
             return;
         }
 
@@ -315,6 +326,7 @@ void keyboard_handler(void) {
         if (scancode == 0x1C) {
             c = '\n';
             keyboard_buffer_add(c);
+            if (!forward) return;
 
             if (tty_is_editor_mode()) {
                 tty_putchar('\n');
@@ -330,6 +342,7 @@ void keyboard_handler(void) {
         if (scancode == 0x35) {
             c = '/';
             keyboard_buffer_add(c);
+            if (!forward) return;
 
             if (tty_is_editor_mode()) {
                 tty_putchar(c);
@@ -389,6 +402,8 @@ void keyboard_handler(void) {
         
         if (c != 0) {
             keyboard_buffer_add(c);
+            // If capture mode is enabled, do not forward to TTY/command handling
+            if (capture_mode) return;
             
             // Check if in editor mode
             #include "tty.h"
@@ -437,4 +452,25 @@ char keyboard_getchar(void) {
 // Check if keyboard has data
 int keyboard_has_key(void) {
     return buffer_read != buffer_write;
+}
+
+// Peek next key without consuming it
+char keyboard_peek(void) {
+    if (buffer_read == buffer_write) return 0;
+    return keyboard_buffer[buffer_read];
+}
+
+// Consume one key (after peek)
+void keyboard_consume(void) {
+    if (buffer_read == buffer_write) return;
+    buffer_read = (buffer_read + 1) % KEYBOARD_BUFFER_SIZE;
+}
+
+// Capture functions
+void keyboard_set_capture(int enable) {
+    capture_mode = enable ? 1 : 0;
+}
+
+int keyboard_get_capture(void) {
+    return capture_mode;
 }

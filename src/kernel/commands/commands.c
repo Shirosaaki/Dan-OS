@@ -896,6 +896,40 @@ void tty_process_command(void) {
             } else {
                 cmd_vm(filename);
             }
+        } else if (strncmp(cmd_buffer, "vmnow ", 6) == 0) {
+            // Immediate run for debugging (no scheduler)
+            char filename[32];
+            int j = 0;
+            int i = 6;
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] == ' ') i++;
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] != ' ' && j < 31) {
+                filename[j++] = cmd_buffer[i++];
+            }
+            filename[j] = '\0';
+            if (filename[0] == '\0') {
+                tty_putstr("Usage: vmnow <payload.bin>\n");
+            } else {
+                // Call synchronous run path
+                // Reuse vm_task logic but run directly
+                extern void vm_task_direct_run(const char *filename);
+                vm_task_direct_run(filename);
+            }
+        } else if (strncmp(cmd_buffer, "vmprobe ", 8) == 0) {
+            char filename[32];
+            int j = 0;
+            int i = 8;
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] == ' ') i++;
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] != ' ' && j < 31) {
+                filename[j++] = cmd_buffer[i++];
+            }
+            filename[j] = '\0';
+            if (filename[0] == '\0') {
+                tty_putstr("Usage: vmprobe <payload.bin>\n");
+            } else {
+                extern int vm_probe(const char *filename);
+                int rc = vm_probe(filename);
+                if (rc == 0) tty_putstr("Probe OK\n"); else tty_putstr("Probe FAILED\n");
+            }
         } else {
             tty_putstr("Unknown command: ");
             tty_putstr(cmd_buffer);
