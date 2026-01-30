@@ -101,7 +101,7 @@ int scheduler_add_task(void (*func)(void)) {
     return 0;
 }
 
-int scheduler_add_user_process(uint64_t cr3, uint64_t entry, uint64_t user_rsp) {
+int scheduler_create_user_process(void *entry_point, void *user_stack_top, uint64_t cr3) {
     // allocate task struct
     task_struct_t *t = (task_struct_t *)kmalloc(sizeof(task_struct_t));
     if (!t) {
@@ -134,25 +134,25 @@ int scheduler_add_user_process(uint64_t cr3, uint64_t entry, uint64_t user_rsp) 
     sp[16] = 32; // int_no
 
     // For iretq: RIP, CS, RFLAGS, RSP, SS
-    sp[17] = entry;        // user RIP
+    sp[17] = (uint64_t)entry_point;    // user RIP
     sp[18] = 0x18 | 3;     // user code segment (ring 3)
     sp[19] = 0x202;        // RFLAGS with interrupts enabled
-    sp[20] = user_rsp;     // user RSP
+    sp[20] = (uint64_t)user_stack_top; // user RSP
     sp[21] = 0x20 | 3;     // user data segment (ring 3)
 
     t->type = TASK_USER;
     t->rsp = (uint64_t)sp;
     t->cr3 = cr3;
-    t->user_rip = entry;
-    t->user_rsp = user_rsp;
+    t->user_rip = (uint64_t)entry_point;
+    t->user_rsp = (uint64_t)user_stack_top;
     t->state = TASK_RUNNABLE;
 
-    tty_putstr("[SCHED] user process added, cr3=0x");
+    tty_putstr("[SCHED] user process created, cr3=0x");
     tty_puthex64(cr3);
     tty_putstr(", entry=0x");
-    tty_puthex64(entry);
+    tty_puthex64((uint64_t)entry_point);
     tty_putstr(", user_rsp=0x");
-    tty_puthex64(user_rsp);
+    tty_puthex64((uint64_t)user_stack_top);
     tty_putstr("\n");
 
     // insert into circular list

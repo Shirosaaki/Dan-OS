@@ -95,7 +95,7 @@ int64_t syscall_handler(uint64_t syscall_num, uint64_t arg1, uint64_t arg2,
         case SYS_FORK:      // 57
             return sys_fork();
         case SYS_EXEC:      // 59
-            return sys_exec((const char*)arg1, (char* const*)arg2);
+            return sys_exec((const char*)arg1, (char* const*)arg2, (char* const*)arg3);
         case SYS_EXIT:      // 60
             sys_exit((int)arg1);
             return 0;
@@ -423,27 +423,28 @@ void sys_exit(int status) {
  * sys_exec - Execute a program
  * @path: path to the executable
  * @argv: argument vector
+ * @envp: environment vector
  * @return: -1 on error (never returns on success)
  */
-int64_t sys_exec(const char* path, char* const argv[]) {
+int64_t sys_exec(const char* path, char* const argv[], char* const envp[]) {
     // Load the ELF binary
     struct proc newproc;
     memset_k(&newproc, 0, sizeof(struct proc));
     
-    if (elf_load_and_create_address_space(path, argv, NULL, &newproc) != 0) {
+    if (elf_load_and_create_address_space(path, argv, envp, &newproc) != 0) {
         tty_putstr("exec: failed to load ELF\n");
         return -1;
     }
     
-    // Add the process to scheduler
-    if (scheduler_add_user_process(newproc.cr3, newproc.entry, newproc.user_rsp) != 0) {
-        tty_putstr("exec: failed to add process to scheduler\n");
+    // Create the user process
+    if (scheduler_create_user_process((void*)newproc.entry, (void*)newproc.user_rsp, newproc.cr3) != 0) {
+        tty_putstr("exec: failed to create user process\n");
         return -1;
     }
     
-    // For now, just return success. In a real exec, this would replace the current process.
-    // Since we don't have process replacement yet, this creates a new process.
-    tty_putstr("exec: process loaded and scheduled\n");
+    // Note: In a real exec, this would replace the current process.
+    // For now, we create a new process and let the scheduler run it.
+    tty_putstr("exec: process created successfully\n");
     return 0;
 }
 

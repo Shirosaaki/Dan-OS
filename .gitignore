@@ -6,3 +6,4 @@ build/
 obj/
 payload*
 tmp
+test/*

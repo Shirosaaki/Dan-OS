@@ -102,7 +102,7 @@ int64_t sys_getline(char* buf, size_t max_len);
 int64_t sys_putchar(char c);
 int64_t sys_getchar(void);
 void    sys_exit(int status);
-int64_t sys_exec(const char* path, char* const argv[]);
+int64_t sys_exec(const char* path, char* const argv[], char* const envp[]);
 int64_t sys_fork(void);
 int64_t sys_wait(int* status);
 int64_t sys_getpid(void);
