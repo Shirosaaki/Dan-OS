@@ -13,6 +13,7 @@
 #include <kernel/drivers/rtc.h>
 #include <kernel/sys/scheduler.h>
 #include <kernel/sys/string.h>
+#include <kernel/drivers/elf.h>
 
 // File descriptor table
 static file_descriptor_t fd_table[MAX_OPEN_FILES];
@@ -425,11 +426,25 @@ void sys_exit(int status) {
  * @return: -1 on error (never returns on success)
  */
 int64_t sys_exec(const char* path, char* const argv[]) {
-    (void)path;
-    (void)argv;
-    // TODO: Implement exec when ELF loading is available
-    tty_putstr("exec: not yet implemented\n");
-    return -1;
+    // Load the ELF binary
+    struct proc newproc;
+    memset_k(&newproc, 0, sizeof(struct proc));
+    
+    if (elf_load_and_create_address_space(path, argv, NULL, &newproc) != 0) {
+        tty_putstr("exec: failed to load ELF\n");
+        return -1;
+    }
+    
+    // Add the process to scheduler
+    if (scheduler_add_user_process(newproc.cr3, newproc.entry, newproc.user_rsp) != 0) {
+        tty_putstr("exec: failed to add process to scheduler\n");
+        return -1;
+    }
+    
+    // For now, just return success. In a real exec, this would replace the current process.
+    // Since we don't have process replacement yet, this creates a new process.
+    tty_putstr("exec: process loaded and scheduled\n");
+    return 0;
 }
 
 /**

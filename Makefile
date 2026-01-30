@@ -47,6 +47,7 @@ PMM_OBJS 		= 	$(patsubst $(PMM_PATH), $(OBJ_PATH), $(PMM_SRCS))
 VMM_OBJS 		= 	$(patsubst $(VMM_PATH), $(OBJ_PATH), $(VMM_SRCS))
 STRING_OBJS 	= 	$(patsubst $(STRING_PATH), $(OBJ_PATH), $(STRING_SRCS))
 SYSCALL_OBJS 	= 	$(patsubst $(SYSCALL_PATH), $(OBJ_PATH), $(SYSCALL_SRCS))
+SYSCALL_S_OBJS 	= 	$(patsubst $(SYSCALL_S_PATH), $(OBJ_PATH), $(SYSCALL_S_SRCS))
 COMMANDS_OBJS 	= 	$(patsubst $(COMMANDS_PATH), $(OBJ_PATH), $(COMMANDS_SRCS))
 TTY_OBJS 		= 	$(patsubst $(TTY_PATH), $(OBJ_PATH), $(TTY_SRCS))
 

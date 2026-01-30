@@ -20,6 +20,7 @@
 #include <kernel/net/tcp.h>
 #include <kernel/net/dns.h>
 #include <kernel/drivers/usb.h>
+#include <cpu/gdt.h>
 
 void kernel_main(void *multiboot_info) {
     // Try to initialize framebuffer from Multiboot2 info
@@ -54,6 +55,8 @@ void kernel_main(void *multiboot_info) {
     tty_putstr("\nDanOS:/$ ");
     // Set initial prompt position for history navigation
     tty_set_prompt_position();
+    // Initialize GDT and TSS
+    gdt_init();
     // Initialize interrupts
     idt_init();
     // Initialize keyboard

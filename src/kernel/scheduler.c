@@ -4,19 +4,25 @@
 #include <kernel/arch/x86_64/vmm.h>
 #include <kernel/sys/tty.h>
 #include <cpu/ports.h>
+#include <cpu/gdt.h>
 #include <stdint.h>
 #include <stddef.h>
 
-// Simple round-robin scheduler for kernel threads
+// Simple round-robin scheduler for kernel threads and user processes
 
 typedef enum { TASK_UNUSED = 0, TASK_RUNNABLE, TASK_RUNNING, TASK_ZOMBIE } task_state_t;
 
+typedef enum { TASK_KERNEL = 0, TASK_USER } task_type_t;
+
 typedef struct task_struct {
     struct task_struct *next;
-    uint64_t rsp;       // saved stack pointer for context
-    uint64_t cr3;       // page table base
+    uint64_t rsp;           // saved stack pointer for context
+    uint64_t cr3;           // page table base
     task_state_t state;
-    void *stack_base;   // allocated stack base (virtual/identity)
+    task_type_t type;       // kernel thread or user process
+    void *stack_base;       // allocated stack base (virtual/identity)
+    uint64_t user_rsp;      // user stack pointer (for user processes)
+    uint64_t user_rip;      // user instruction pointer (for user processes)
 } task_struct_t;
 
 static task_struct_t *task_list = NULL;
@@ -74,12 +80,79 @@ int scheduler_add_task(void (*func)(void)) {
     sp[18] = 0x08; // kernel code segment
     sp[19] = 0x202; // RFLAGS with interrupts enabled
 
+    t->type = TASK_KERNEL;
     t->rsp = (uint64_t)sp;
     tty_putstr("[SCHED] task rsp=0x");
     tty_puthex64(t->rsp);
     tty_putstr("\n");
     t->cr3 = vmm_get_cr3();
     t->state = TASK_RUNNABLE;
+
+    // insert into circular list
+    if (!task_list) {
+        task_list = t;
+        t->next = t;
+    } else {
+        t->next = task_list->next;
+        task_list->next = t;
+    }
+
+    return 0;
+}
+
+int scheduler_add_user_process(uint64_t cr3, uint64_t entry, uint64_t user_rsp) {
+    // allocate task struct
+    task_struct_t *t = (task_struct_t *)kmalloc(sizeof(task_struct_t));
+    if (!t) {
+        return -1;
+    }
+    memset_k(t, 0, sizeof(task_struct_t));
+
+    // Allocate kernel stack for the process
+    void *stack = alloc_stack();
+    if (!stack) {
+        tty_putstr("[SCHED] alloc_stack failed for user process\n");
+        kfree(t);
+        return -1;
+    }
+    t->stack_base = stack;
+
+    // Build initial kernel stack for context switch
+    // When we switch to this process, we need to iretq to user mode
+    uint64_t *stack_top = (uint64_t *)((char*)stack + 4096);
+    stack_top = (uint64_t *)((uintptr_t)stack_top & ~0xF);
+    // Space for saved regs (15*8=120), error(8), int_no(8), RIP(8), CS(8), RFLAGS(8), RSP(8), SS(8) = 176 bytes -> 22 uint64_t
+    stack_top -= 22;
+    uint64_t *sp = stack_top;
+
+    // Zero saved registers
+    for (int i = 0; i < 15; ++i) sp[i] = 0;
+
+    // Error code and int_no
+    sp[15] = 0; // error code
+    sp[16] = 32; // int_no
+
+    // For iretq: RIP, CS, RFLAGS, RSP, SS
+    sp[17] = entry;        // user RIP
+    sp[18] = 0x18 | 3;     // user code segment (ring 3)
+    sp[19] = 0x202;        // RFLAGS with interrupts enabled
+    sp[20] = user_rsp;     // user RSP
+    sp[21] = 0x20 | 3;     // user data segment (ring 3)
+
+    t->type = TASK_USER;
+    t->rsp = (uint64_t)sp;
+    t->cr3 = cr3;
+    t->user_rip = entry;
+    t->user_rsp = user_rsp;
+    t->state = TASK_RUNNABLE;
+
+    tty_putstr("[SCHED] user process added, cr3=0x");
+    tty_puthex64(cr3);
+    tty_putstr(", entry=0x");
+    tty_puthex64(entry);
+    tty_putstr(", user_rsp=0x");
+    tty_puthex64(user_rsp);
+    tty_putstr("\n");
 
     // insert into circular list
     if (!task_list) {
@@ -151,6 +224,12 @@ void *scheduler_switch(void *regs) {
     // switch CR3 if different
     if (t->cr3 != vmm_get_cr3()) {
         vmm_set_cr3(t->cr3);
+    }
+
+    // For user processes, set TSS RSP0 to the kernel stack
+    if (t->type == TASK_USER) {
+        uint64_t kernel_stack_top = (uint64_t)t->stack_base + 4096;
+        tss_set_stack(kernel_stack_top);
     }
 
     t->state = TASK_RUNNING;
