@@ -5,6 +5,7 @@
 #include <kernel/sys/tty.h>
 #include <cpu/ports.h>
 #include <cpu/gdt.h>
+#include <kernel/sys/string.h>
 #include <stdint.h>
 #include <stddef.h>
 
