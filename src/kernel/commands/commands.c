@@ -12,6 +12,7 @@
 #include <kernel/net/dns.h>
 #include <kernel/net/tcp.h>
 #include <kernel/net/http.h>
+#include <kernel/sys/syscall.h>
 
 extern void tty_putchar_internal(char c);
 extern size_t tty_row;
@@ -55,6 +56,7 @@ void tty_process_command(void) {
             tty_putstr("  netpoll  - Poll network for packets (debug)\n");
             tty_putstr("  dns      - Resolve hostname to IP (dns hostname)\n");
             tty_putstr("  fetch    - Fetch a webpage (fetch http://url)\n");
+            tty_putstr("  exec     - Execute ELF binary in user mode (exec filename [args])\n");
             tty_putstr("  reboot   - Reboot the system\n");
             tty_putstr("  shutdown  - Shut down the system\n");
         } else if (strncmp(cmd_buffer, "cls", 3) == 0) {
@@ -929,6 +931,53 @@ void tty_process_command(void) {
                 extern int vm_probe(const char *filename);
                 int rc = vm_probe(filename);
                 if (rc == 0) tty_putstr("Probe OK\n"); else tty_putstr("Probe FAILED\n");
+            }
+        } else if (strncmp(cmd_buffer, "exec ", 5) == 0) {
+            // Execute a user-mode ELF binary: exec filename [args...]
+            char *argv[16]; // Max 16 arguments
+            int argc = 0;
+            
+            // Parse command line
+            int i = 5; // Skip "exec "
+            
+            // Skip leading spaces
+            while (i < strlength(cmd_buffer) && cmd_buffer[i] == ' ') i++;
+            
+            // Parse arguments
+            while (i < strlength(cmd_buffer) && argc < 15) {
+                // Skip spaces between arguments
+                while (i < strlength(cmd_buffer) && cmd_buffer[i] == ' ') i++;
+                if (i >= strlength(cmd_buffer)) break;
+                
+                // Start of argument
+                argv[argc++] = &cmd_buffer[i];
+                
+                // Find end of argument
+                while (i < strlength(cmd_buffer) && cmd_buffer[i] != ' ') i++;
+                if (i < strlength(cmd_buffer)) {
+                    cmd_buffer[i] = '\0'; // Null terminate
+                    i++;
+                }
+            }
+            argv[argc] = NULL; // Null terminate argv
+            
+            if (argc == 0) {
+                tty_putstr("Usage: exec <filename> [args...]\n");
+                tty_putstr("Example: exec hello.bin world\n");
+            } else {
+                tty_putstr("Executing: ");
+                tty_putstr(argv[0]);
+                tty_putstr("\n");
+                
+                // Call sys_exec
+                char *envp[] = {NULL}; // Empty environment for now
+                int64_t result = sys_exec(argv[0], argv, envp);
+                
+                if (result == 0) {
+                    tty_putstr("Process started successfully\n");
+                } else {
+                    tty_putstr("Failed to execute program\n");
+                }
             }
         } else {
             tty_putstr("Unknown command: ");
