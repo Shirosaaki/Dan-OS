@@ -8,19 +8,18 @@
 .align 16
     /* 
      * Temporary storage for User RSP.
-     * In a full OS, this should be per-CPU data accessed via GS base.
      */
     .global temp_user_rsp
     temp_user_rsp: .skip 8
 
     /* 
      * Temporary kernel stack for the syscall handler.
-     * In a full OS, this should come from the TSS (RSP0).
+     * This MUST be set by the scheduler on context switch.
      */
     .global temp_kernel_rsp
     temp_kernel_rsp: .skip 8
     
-    /* Fallback stack if temp_kernel_rsp isn't set */
+    /* Fallback stack */
     .align 16
     fallback_stack_bottom:
     .skip 4096
@@ -33,13 +32,11 @@
 syscall_entry:
     /* 
      * 1. Save User Stack Pointer 
-     * If you had swapgs set up, you would do: swapgs; movq %rsp, %gs:scratch_offset
      */
     movq %rsp, temp_user_rsp(%rip)
 
     /* 
      * 2. Load Kernel Stack Pointer 
-     * We try to load a preset kernel stack. If 0, use fallback.
      */
     movq temp_kernel_rsp(%rip), %rsp
     cmpq $0, %rsp
@@ -48,8 +45,10 @@ syscall_entry:
 1:
 
     /* 
-     * 3. Construct Trap Frame for IRETQ/SYSRETQ compatibility
+     * 3. Construct Trap Frame
      * Stack Layout: SS, RSP, RFLAGS, CS, RIP
+     * User code selector = 0x1B (code, RPL=3)
+     * User data selector = 0x23 (data, RPL=3)
      */
     pushq $0x23                 /* SS (User Data) */
     pushq temp_user_rsp(%rip)   /* User RSP */
@@ -59,7 +58,6 @@ syscall_entry:
 
     /* 
      * 4. Save General Purpose Registers 
-     * Pushing in specific order to match standard struct pt_regs
      */
     pushq %rax
     pushq %rbx
@@ -78,11 +76,7 @@ syscall_entry:
     pushq %r15
 
     /* 
-     * 5. Map Arguments
-     * Syscall ABI: RAX(nr), RDI(a1), RSI(a2), RDX(a3), R10(a4), R8(a5), R9(a6)
-     * C ABI:       RDI(a1), RSI(a2), RDX(a3), RCX(a4), R8(a5),  R9(a6)
-     *
-     * We map:
+     * 5. Map Arguments (System V ABI)
      * Handler(nr, arg1, arg2, arg3, arg4, arg5)
      */
     movq %r8,  %r9      /* Arg5 -> Arg6 reg (R9) */
@@ -96,10 +90,7 @@ syscall_entry:
     call syscall_handler
 
     /* 
-     * 7. Save Return Value
-     * syscall_handler returns result in RAX. 
-     * We overwrite the saved RAX on the stack (which is at offset 112)
-     * 14 registers * 8 bytes = 112 bytes
+     * 7. Save Return Value into saved RAX (offset 112)
      */
     movq %rax, 112(%rsp)
 
@@ -118,17 +109,14 @@ syscall_entry:
     popq %rdx
     popq %rcx
     popq %rbx
-    popq %rax  /* Pops the return value we saved earlier */
+    popq %rax
 
     /* 
      * 9. Return to User Mode (SYSRETQ)
-     * Stack here: RIP, CS, RFLAGS, RSP, SS
-     * SYSRETQ requires: RIP in RCX, RFLAGS in R11
      */
     popq %rcx       /* Restore RIP -> RCX */
     addq $8, %rsp   /* Skip CS */
     popq %r11       /* Restore RFLAGS -> R11 */
-    popq %rsp       /* Restore User RSP -> RSP (Stack Switch) */
+    popq %rsp       /* Restore User RSP -> RSP */
     
-    /* We are now on the User Stack */
     sysretq

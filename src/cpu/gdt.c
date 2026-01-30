@@ -11,21 +11,35 @@ uint64_t gdt[7];
 struct gdt_ptr gdt_ptr;
 struct tss_entry tss;
 
+// Helper to build a 64-bit GDT descriptor
+static uint64_t build_desc(uint32_t base, uint32_t limit, uint8_t access, uint8_t flags) {
+    uint64_t desc = 0;
+    desc  = (uint64_t)(limit & 0xFFFF);
+    desc |= (uint64_t)(base & 0xFFFF) << 16;
+    desc |= (uint64_t)((base >> 16) & 0xFF) << 32;
+    desc |= (uint64_t)access << 40;
+    desc |= (uint64_t)((limit >> 16) & 0xF) << 48;
+    desc |= (uint64_t)(flags & 0xF) << 52;
+    desc |= (uint64_t)((base >> 24) & 0xFF) << 56;
+    return desc;
+}
+
 void gdt_init() {
     // Null descriptor
     gdt[0] = 0;
+    // use file-scope build_desc
 
-    // Kernel code segment (ring 0, executable, 64-bit)
-    gdt[1] = 0x0020980000000000;
+    // Kernel code segment (ring 0, executable, 64-bit): access=0x9A, flags upper nibble=(G=1,L=1)->0xA
+    gdt[1] = build_desc(0, 0xFFFF, 0x9A, 0xA);
 
-    // Kernel data segment (ring 0, data)
-    gdt[2] = 0x0000920000000000;
+    // Kernel data segment (ring 0, data): access=0x92, flags upper nibble=(G=1,D/B=1)->0xC
+    gdt[2] = build_desc(0, 0xFFFF, 0x92, 0xC);
 
-    // User code segment (ring 3, executable, 64-bit)
-    gdt[3] = 0x0020F80000000000;
+    // User code segment (ring 3, executable, 64-bit): access=0xFA (DPL=3)
+    gdt[3] = build_desc(0, 0xFFFF, 0xFA, 0xA);
 
-    // User data segment (ring 3, data)
-    gdt[4] = 0x0000F20000000000;
+    // User data segment (ring 3, data): access=0xF2 (DPL=3)
+    gdt[4] = build_desc(0, 0xFFFF, 0xF2, 0xC);
 
     // TSS descriptor (spans two entries)
     uint64_t tss_base = (uint64_t)&tss;

@@ -5,6 +5,7 @@
 #include <kernel/arch/x86_64/idt.h>
 #include <kernel/sys/tty.h>
 #include <cpu/ports.h>
+#include <kernel/arch/x86_64/vmm.h>
 
 // IDT entries and pointer
 static idt_entry_t idt[IDT_ENTRIES];
@@ -76,6 +77,14 @@ void idt_init(void) {
     // Remap PIC
     pic_remap();
 
+    // Program PIT for timer interrupts (~100Hz)
+    outb(0x43, 0x36); // channel 0, mode 3, binary
+    outb(0x40, 0x9B); // divisor low
+    outb(0x40, 0x2E); // divisor high
+
+    // Unmask timer interrupt (IRQ0)
+    outb(PIC1_DATA, 0xFE);
+
     // Install CPU exception handlers (ISRs)
     idt_set_gate(0, (uint64_t)isr0, 0x08, 0x8E);
     idt_set_gate(1, (uint64_t)isr1, 0x08, 0x8E);
@@ -136,10 +145,77 @@ void idt_init(void) {
 }
 
 // ISR handler
-void isr_handler(uint64_t int_no) {
+void isr_handler(uint64_t int_no, uint64_t error_code, uint64_t *frame) {
     if (int_no == 14) {
-        tty_putstr("Page fault (int 14) — halting.\n");
-        // Stop further interrupts to avoid flood while debugging
+        /* Minimal, safe page-fault handler: print error, CR2 and RIP, then halt.
+           Avoid dereferencing page-tables here to prevent boot-time faults. */
+        tty_putstr("Page fault (int 14) error_code=");
+        tty_puthex64(error_code);
+        tty_putstr(" cr2=");
+        uint64_t cr2;
+        __asm__ volatile("mov %%cr2, %0" : "=r"(cr2));
+        tty_puthex64(cr2);
+        if (frame) {
+            tty_putstr(" rip=");
+            tty_puthex64(frame[0]);
+        }
+        tty_putstr(" — halting.\n");
+        __asm__ volatile("cli; hlt");
+    } else if (int_no == 13) {
+        /* General Protection Fault: print basic info and halt. */
+        tty_putstr("General Protection Fault (int 13) error_code=");
+        tty_puthex64(error_code);
+        if (frame) {
+            tty_putstr(" rip="); tty_puthex64(frame[0]);
+            tty_putstr(" cs="); tty_puthex64(frame[1]);
+        }
+        tty_putstr(" — halting.\n");
+        __asm__ volatile("cli; hlt");
+        tty_putstr("General Protection Fault (int 13) error_code=");
+        tty_puthex64(error_code);
+        uint64_t rip = 0, cs = 0;
+        if (frame) {
+            rip = frame[0];
+            cs  = frame[1];
+            tty_putstr(" rip=");
+            tty_puthex64(rip);
+            tty_putstr(" cs=");
+            tty_puthex64(cs);
+        }
+        uint64_t cr3 = vmm_get_cr3();
+        tty_putstr(" cr3="); tty_puthex64(cr3);
+
+        // Page table walk for rip
+        if (rip) {
+            uint64_t *pml4 = (uint64_t *)(uintptr_t)cr3;
+            size_t i4 = (rip >> 39) & 0x1FF;
+            uint64_t pml4val = pml4[i4];
+            tty_putstr(" pml4["); tty_putdec(i4); tty_putstr("]="); tty_puthex64(pml4val);
+            if (pml4val & VMM_PFLAG_PRESENT) {
+                uint64_t *pdpe = (uint64_t *)(uintptr_t)(pml4val & 0x000ffffffffff000ULL);
+                size_t i3 = (rip >> 30) & 0x1FF;
+                uint64_t pdpval = pdpe[i3];
+                tty_putstr(" pdp["); tty_putdec(i3); tty_putstr("]="); tty_puthex64(pdpval);
+                if (pdpval & VMM_PFLAG_PRESENT) {
+                    uint64_t *pde = (uint64_t *)(uintptr_t)(pdpval & 0x000ffffffffff000ULL);
+                    size_t i2 = (rip >> 21) & 0x1FF;
+                    uint64_t pdeval = pde[i2];
+                    tty_putstr(" pd["); tty_putdec(i2); tty_putstr("]="); tty_puthex64(pdeval);
+                    if (pdeval & VMM_PFLAG_PRESENT) {
+                        uint64_t *pte = (uint64_t *)(uintptr_t)(pdeval & 0x000ffffffffff000ULL);
+                        size_t i1 = (rip >> 12) & 0x1FF;
+                        uint64_t pteval = pte[i1];
+                        tty_putstr(" pt["); tty_putdec(i1); tty_putstr("]="); tty_puthex64(pteval);
+                        if (pteval & VMM_PFLAG_PRESENT) {
+                            uint64_t paddr = pteval & 0x000ffffffffff000ULL;
+                            tty_putstr(" -> phys="); tty_puthex64(paddr);
+                        }
+                    }
+                }
+            }
+        }
+
+        tty_putstr(" — halting.\n");
         __asm__ volatile("cli; hlt");
     }
 

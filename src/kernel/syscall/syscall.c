@@ -57,6 +57,7 @@ void syscall_init(void) {
     // MSR_STAR: bits 32-47 = kernel CS (0x08), bits 48-63 = user CS (0x1B for ring 3)
     // On sysret: CS = STAR[48:63] + 16, SS = STAR[48:63] + 8
     // On syscall: CS = STAR[32:47], SS = STAR[32:47] + 8
+    // Kernel CS = 0x08, User CS = 0x1B (RPL=3)
     uint64_t star = ((uint64_t)0x08 << 32) | ((uint64_t)0x1B << 48);
     wrmsr(MSR_STAR, star);
     

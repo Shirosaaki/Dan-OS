@@ -8,87 +8,32 @@
 #include <stdint.h>
 #include <stddef.h>
 
-// Simplified ELF types
-typedef uint16_t Elf64_Half;
-typedef uint32_t Elf64_Word;
-typedef int32_t  Elf64_Sword;
-typedef uint64_t Elf64_Xword;
-typedef int64_t  Elf64_Sxword;
-typedef uint64_t Elf64_Addr;
-typedef uint64_t Elf64_Off;
-
-#define EI_NIDENT 16
-
-typedef struct {
-    unsigned char e_ident[EI_NIDENT];
-    Elf64_Half    e_type;
-    Elf64_Half    e_machine;
-    Elf64_Word    e_version;
-    Elf64_Addr    e_entry;
-    Elf64_Off     e_phoff;
-    Elf64_Off     e_shoff;
-    Elf64_Word    e_flags;
-    Elf64_Half    e_ehsize;
-    Elf64_Half    e_phentsize;
-    Elf64_Half    e_phnum;
-    Elf64_Half    e_shentsize;
-    Elf64_Half    e_shnum;
-    Elf64_Half    e_shstrndx;
-} Elf64_Ehdr;
-
-typedef struct {
-    Elf64_Word p_type;
-    Elf64_Word p_flags;
-    Elf64_Off  p_offset;
-    Elf64_Addr p_vaddr;
-    Elf64_Addr p_paddr;
-    Elf64_Xword p_filesz;
-    Elf64_Xword p_memsz;
-    Elf64_Xword p_align;
-} Elf64_Phdr;
-
-// Program header types
-#define PT_NULL 0
+// ELF types and structures are provided by include/kernel/drivers/elf.h
+// PT_LOAD remains defined here for program header type
 #define PT_LOAD 1
 
-// ELF identification indexes
-#define EI_MAG0 0
-#define EI_MAG1 1
-#define EI_MAG2 2
-#define EI_MAG3 3
-#define EI_CLASS 4
-#define EI_DATA 5
-#define EI_OSABI 7
-
-// e_ident values
 #define ELFMAG0 0x7F
 #define ELFMAG1 'E'
 #define ELFMAG2 'L'
 #define ELFMAG3 'F'
 #define ELFCLASS64 2
 #define ELFDATA2LSB 1
-
-// e_type
-#define ET_NONE 0
-#define ET_REL 1
 #define ET_EXEC 2
 #define ET_DYN 3
 
-// Auxv types
 #define AT_NULL 0
 #define AT_PHDR 3
 #define AT_PHENT 4
 #define AT_PHNUM 5
-#define AT_ENTRY 9
 #define AT_PAGESZ 6
+#define AT_ENTRY 9
 
-// Page size
 #define PAGE_SIZE 4096
 
 // Protection flags mapping: we will map user pages with USER and optionally WRITE
 static uint64_t elf_phdr_prot_to_vmm_flags(uint32_t p_flags) {
     uint64_t flags = VMM_PFLAG_USER | VMM_PFLAG_PRESENT;
-    if (p_flags & 0x2) flags |= VMM_PFLAG_WRITE; // PF_W
+    if (p_flags & 0x2) flags |= VMM_PFLAG_WRITE;
     return flags;
 }
 
@@ -109,7 +54,6 @@ static void *local_memset(void *s, int c, size_t n) {
     return s;
 }
 static size_t local_strlen(const char *s) {
-    // use kernel-provided strlength if available
     extern int strlength(const char* str);
     return (size_t)strlength(s);
 }
@@ -117,106 +61,110 @@ static size_t local_strlen(const char *s) {
 // Build a user stack in kernel memory and map into newproc address space
 // Returns virtual user stack pointer (rsp) on success, 0 on failure
 static uint64_t build_user_stack(struct proc *newproc, char *const argv[], char *const envp[]) {
-    // Allocate one page for stack
+    // 1. Allocate a physical page for the stack
     void *stack_page = pmm_alloc_page();
-    if (!stack_page) return 0;
-    // We will map this physical page into the user address space at a conventional stack top: 0x7FFFFFFF000 (near top of canonical user space)
-    uint64_t user_stack_top = 0x00007FFFFFFFF000ULL; // keep 4K below top for alignment
-    uint64_t user_stack_page = user_stack_top & ~(PAGE_SIZE - 1);
+    if (!stack_page) {
+        tty_putstr("[ELF] pmm_alloc_page for stack failed\n");
+        return 0;
+    }
 
-    // Temporarily switch to newproc->cr3 to map
+    // 2. Define the Virtual Address for the stack page.
+    // We map the page at 0x7FFFFFFFF000. 
+    // The top of the stack will be at 0x800000000000 (end of this page).
+    uint64_t user_stack_page_base = 0x00007FFFFFFFF000ULL;
+    uint64_t user_stack_top_limit = user_stack_page_base + PAGE_SIZE;
+
+    // 3. Map it into the user process address space
     uint64_t orig_cr3 = vmm_get_cr3();
     vmm_set_cr3(newproc->cr3);
-    if (vmm_map_page(user_stack_page, (uint64_t)(uintptr_t)stack_page, VMM_PFLAG_USER | VMM_PFLAG_WRITE) != 0) {
+    if (vmm_map_page(user_stack_page_base, (uint64_t)(uintptr_t)stack_page, VMM_PFLAG_USER | VMM_PFLAG_WRITE) != 0) {
         vmm_set_cr3(orig_cr3);
         return 0;
     }
-    // Restore original CR3
     vmm_set_cr3(orig_cr3);
 
-    // Now copy data into the physical page (identity mapped assumption)
-    void *kstack = (void *)(uintptr_t)stack_page;
-    local_memset(kstack, 0, PAGE_SIZE);
+    // 4. Populate stack data: map the physical page into a temporary kernel VA so we can write to it
+    const uint64_t KERNEL_TEMP_VA = 0xFFFF800000F00000ULL;
+    vmm_set_cr3(orig_cr3);
+    if (vmm_map_page(KERNEL_TEMP_VA, (uint64_t)(uintptr_t)stack_page, VMM_PFLAG_WRITE) != 0) {
+        // cleanup mapping in newproc
+        vmm_set_cr3(newproc->cr3);
+        vmm_unmap_page(user_stack_page_base);
+        vmm_set_cr3(orig_cr3);
+        return 0;
+    }
+    void *kstack_base = (void *)(uintptr_t)KERNEL_TEMP_VA;
+    local_memset(kstack_base, 0, PAGE_SIZE);
 
-    // Build stack contents: argc, argv pointers, envp pointers, auxv
-    // We'll place strings at the top region growing down
-    uint64_t sp = user_stack_top;
-    // helper to push data
-    #define PUSH_U64(x) do { sp -= 8; *(uint64_t *)((char*)kstack + (sp - user_stack_page)) = (uint64_t)(x); } while(0)
+    // sp represents the current stack pointer value (Virtual Address)
+    // We start at the very top of the allocated page.
+    uint64_t sp = user_stack_top_limit;
 
-    // Copy strings for argv and envp into stack area
-    // Collect pointers in kernel arrays first
+    // Helper macro to calculate offset within the kernel page
+    #define KSTACK_PTR(virt_addr) ((char*)kstack_base + ((virt_addr) - user_stack_page_base))
+
+    // Helper to push 64-bit value
+    #define PUSH_U64(x) do { \
+        sp -= 8; \
+        *(uint64_t *)KSTACK_PTR(sp) = (uint64_t)(x); \
+    } while(0)
+
+    // Calculate counts
     int argc = 0;
     while (argv && argv[argc]) argc++;
     int envc = 0;
     while (envp && envp[envc]) envc++;
 
-    // Copy strings — place them below top by chunks
-    // We'll place all strings contiguously and store user pointers accordingly
-    // Start string area a bit below sp
-    uint64_t string_area_end = sp - 128; // leave aux/argv area
-    uint64_t string_pos = string_area_end;
-
-    // arrays to hold user pointers
+    // --- Push Strings (argv/envp data) ---
+    // We allocate temporary arrays to hold the pointers to these strings
     uint64_t *argv_ptrs = (uint64_t *)kmalloc((argc + 1) * sizeof(uint64_t));
     uint64_t *envp_ptrs = (uint64_t *)kmalloc((envc + 1) * sizeof(uint64_t));
-    if ((argc && !argv_ptrs) || (envc && !envp_ptrs)) return 0;
-
-    for (int i = argc - 1; i >= 0; --i) {
-        size_t l = local_strlen(argv[i]) + 1;
-        string_pos -= l;
-        // align
-        string_pos &= ~0x7;
-        // copy into kstack at offset (string_pos - user_stack_page)
-        local_memcpy((char*)kstack + (string_pos - user_stack_page), argv[i], l);
-        argv_ptrs[i] = string_pos;
-    }
+    
+    // Push environment strings
     for (int i = envc - 1; i >= 0; --i) {
         size_t l = local_strlen(envp[i]) + 1;
-        string_pos -= l;
-        string_pos &= ~0x7;
-        local_memcpy((char*)kstack + (string_pos - user_stack_page), envp[i], l);
-        envp_ptrs[i] = string_pos;
+        sp -= l;
+        sp &= ~0xF; // Align strings? Not strictly required by ABI but good practice or just align 1
+        local_memcpy(KSTACK_PTR(sp), envp[i], l);
+        envp_ptrs[i] = sp;
+    }
+    
+    // Push argument strings
+    for (int i = argc - 1; i >= 0; --i) {
+        size_t l = local_strlen(argv[i]) + 1;
+        sp -= l;
+        sp &= ~0xF; 
+        local_memcpy(KSTACK_PTR(sp), argv[i], l);
+        argv_ptrs[i] = sp;
     }
 
-    // Align stack pointer for pointer area
-    sp = string_pos & ~0xF;
+    // Align stack pointer to 16 bytes before pushing array pointers
+    sp &= ~0xF;
 
-    // Push NULL terminator for envp
-    PUSH_U64(0);
-    // push envp pointers
+    // --- Push Auxv ---
+    // (AT_NULL must be at the bottom of aux array)
+    PUSH_U64(0); PUSH_U64(AT_NULL);
+    PUSH_U64(PAGE_SIZE); PUSH_U64(AT_PAGESZ);
+    PUSH_U64(newproc->entry); PUSH_U64(AT_ENTRY);
+    
+    // --- Push Envp Pointers ---
+    PUSH_U64(0); // NULL terminator
     for (int i = envc - 1; i >= 0; --i) PUSH_U64(envp_ptrs[i]);
-    // Push NULL terminator for argv
-    PUSH_U64(0);
+
+    // --- Push Argv Pointers ---
+    PUSH_U64(0); // NULL terminator
     for (int i = argc - 1; i >= 0; --i) PUSH_U64(argv_ptrs[i]);
-    // Push argc
+
+    // --- Push Argc ---
     PUSH_U64(argc);
 
-    // Push auxiliary vector entries
-    // AT_PHDR, AT_PHENT, AT_PHNUM, AT_ENTRY, AT_PAGESZ, AT_NULL
-    PUSH_U64(0); // AT_NULL
-    PUSH_U64(0);
-    // We will set proper AT_* values by later patching from newproc state; for now put zeros
-    // In practice many programs only need AT_PAGESZ and AT_NULL; we set minimal set
-    PUSH_U64(AT_PAGESZ);
-    PUSH_U64(PAGE_SIZE);
-    PUSH_U64(AT_ENTRY);
-    PUSH_U64(newproc->entry);
-    PUSH_U64(AT_PHNUM);
-    PUSH_U64(0);
-    PUSH_U64(AT_PHENT);
-    PUSH_U64(0);
-    PUSH_U64(AT_PHDR);
-    PUSH_U64(0);
-
-    // Clean up
-    #undef PUSH_U64
-
-    // Free temporary kernel arrays
+    // Cleanup
     if (argv_ptrs) kfree(argv_ptrs);
     if (envp_ptrs) kfree(envp_ptrs);
 
-    // Return stack pointer
+    // Unmap temporary kernel mapping
+    vmm_unmap_page(KERNEL_TEMP_VA);
+
     return sp;
 }
 
@@ -229,211 +177,138 @@ int elf_load_and_create_address_space(const char *path, char *const argv[], char
         return -2;
     }
 
-    // Read ELF header
     Elf64_Ehdr ehdr;
     if (fat32_read_file(&file, (uint8_t*)&ehdr, sizeof(Elf64_Ehdr)) != (int)sizeof(Elf64_Ehdr)) {
-        tty_putstr("elf: read ehdr failed\n");
         return -3;
     }
 
-    // Validate magic
-    if (ehdr.e_ident[EI_MAG0] != ELFMAG0 || ehdr.e_ident[EI_MAG1] != ELFMAG1 || ehdr.e_ident[EI_MAG2] != ELFMAG2 || ehdr.e_ident[EI_MAG3] != ELFMAG3) {
-        tty_putstr("elf: invalid magic\n");
-        return -4;
-    }
-    if (ehdr.e_ident[EI_CLASS] != ELFCLASS64) {
-        tty_putstr("elf: not ELF64\n");
-        return -5;
-    }
-    if (ehdr.e_ident[EI_DATA] != ELFDATA2LSB) {
-        tty_putstr("elf: unsupported endianness\n");
-        return -6;
-    }
+    if (ehdr.e_ident[0] != ELFMAG0 || ehdr.e_ident[1] != ELFMAG1 || 
+        ehdr.e_ident[2] != ELFMAG2 || ehdr.e_ident[3] != ELFMAG3) return -4;
+    if (ehdr.e_ident[4] != ELFCLASS64) return -5;
 
-    if (!(ehdr.e_type == ET_EXEC || ehdr.e_type == ET_DYN)) {
-        tty_putstr("elf: unsupported type\n");
-        return -7;
-    }
-
-    // Clone current page table for newproc
     uint64_t orig_cr3 = vmm_get_cr3();
     uint64_t new_cr3 = vmm_clone_table(orig_cr3);
     if (!new_cr3) return -8;
     newproc->cr3 = new_cr3;
 
-    // If ET_DYN (PIE), choose random base aligned to 0x100000
-    uint64_t base = 0;
-    if (ehdr.e_type == ET_DYN) {
-        // derive pseudo-random base from a pmm_alloc_page and its address
-        void *r = pmm_alloc_page();
-        if (!r) return -9;
-        uint64_t rnd = ((uint64_t)(uintptr_t)r) ^ (uint64_t)(&rnd);
-        // align to 1MiB
-        base = (rnd & 0xFFFFFFFFFFFFF000ULL) & ~0xFFFFFULL;
-        if (base < 0x1000000) base += 0x1000000;
-    }
+    uint64_t base = (ehdr.e_type == ET_DYN) ? 0x400000 : 0;
 
-    // Iterate program headers
-    // Read phdr table
-    if (ehdr.e_phoff == 0 || ehdr.e_phnum == 0) return -10;
-
-    // Read all program headers into kernel memory
     size_t phdr_tbl_size = ehdr.e_phnum * ehdr.e_phentsize;
     Elf64_Phdr *phdrs = (Elf64_Phdr *)kmalloc(phdr_tbl_size);
     if (!phdrs) return -11;
-    // Seek to phoff in file
-    // fat32_read_file reads sequentially; use a fresh open to read from offset
-    fat32_open_file(path, &file);
-    // skip to e_phoff
+
+    fat32_open_file(path, &file); // Reopen to reset offset
+    
+    // Skip to Program Headers
     if (ehdr.e_phoff) {
-        // read and discard up to phoff
-        uint8_t tmpbuf[256];
-        uint64_t toskip = ehdr.e_phoff;
-        while (toskip) {
-            uint32_t r = (toskip > sizeof(tmpbuf)) ? sizeof(tmpbuf) : (uint32_t)toskip;
-            int got = fat32_read_file(&file, tmpbuf, r);
-            if (got <= 0) { kfree(phdrs); return -12; }
-            toskip -= got;
+        uint8_t tmp[256];
+        uint64_t skip = ehdr.e_phoff;
+        while(skip > 0) {
+            int r = (skip > 256) ? 256 : skip;
+            fat32_read_file(&file, tmp, r);
+            skip -= r;
         }
     }
-    if (fat32_read_file(&file, (uint8_t*)phdrs, phdr_tbl_size) != (int)phdr_tbl_size) {
-        kfree(phdrs);
-        return -13;
-    }
+    fat32_read_file(&file, (uint8_t*)phdrs, phdr_tbl_size);
 
-    // For each PT_LOAD, map pages into newproc and copy data
+    // Load Segments
     for (int i = 0; i < ehdr.e_phnum; ++i) {
-        Elf64_Phdr *ph = (Elf64_Phdr *)&phdrs[i];
+        Elf64_Phdr *ph = (Elf64_Phdr *)((uintptr_t)phdrs + i * ehdr.e_phentsize);
         if (ph->p_type != PT_LOAD) continue;
 
-        uint64_t seg_vaddr = ph->p_vaddr;
-        if (ehdr.e_type == ET_DYN) seg_vaddr += base;
-
+        uint64_t seg_vaddr = ph->p_vaddr + base;
         uint64_t seg_start = page_round_down(seg_vaddr);
         uint64_t seg_end = page_round_up(seg_vaddr + ph->p_memsz);
-        uint64_t seg_size = seg_end - seg_start;
 
-        // Map each page: allocate physical page and map into newproc
-        uint64_t orig = vmm_get_cr3();
+        // Map pages
         vmm_set_cr3(newproc->cr3);
         for (uint64_t va = seg_start; va < seg_end; va += PAGE_SIZE) {
             void *page = pmm_alloc_page();
-            if (!page) {
-                vmm_set_cr3(orig);
-                kfree(phdrs);
-                return -14;
-            }
-            if (vmm_map_page(va, (uint64_t)(uintptr_t)page, elf_phdr_prot_to_vmm_flags(ph->p_flags)) != 0) {
-                vmm_set_cr3(orig);
-                kfree(phdrs);
-                return -15;
-            }
+            vmm_map_page(va, (uint64_t)(uintptr_t)page, elf_phdr_prot_to_vmm_flags(ph->p_flags));
         }
-        vmm_set_cr3(orig);
+        vmm_set_cr3(orig_cr3);
 
-        // Now copy p_filesz from file into mapped pages
-        if (ph->p_filesz) {
-            // read segment from file: reopen and skip to offset
+        // Copy Data
+        if (ph->p_filesz > 0) {
             fat32_file_t segf;
-            if (fat32_open_file(path, &segf) != 0) { kfree(phdrs); return -16; }
-            uint64_t toskip = ph->p_offset;
-            uint8_t tmpbuf[256];
-            while (toskip) {
-                uint32_t r = (toskip > sizeof(tmpbuf)) ? sizeof(tmpbuf) : (uint32_t)toskip;
-                int got = fat32_read_file(&segf, tmpbuf, r);
-                if (got <= 0) { kfree(phdrs); return -17; }
-                toskip -= got;
+            fat32_open_file(path, &segf);
+            
+            // Skip to p_offset
+            uint64_t skip = ph->p_offset;
+            uint8_t tmp[512];
+            while(skip > 0) {
+                int r = (skip > 512) ? 512 : skip;
+                fat32_read_file(&segf, tmp, r);
+                skip -= r;
             }
+
             uint64_t remaining = ph->p_filesz;
-            uint64_t file_off = 0;
-            while (remaining) {
-                uint32_t chunk = (remaining > sizeof(tmpbuf)) ? sizeof(tmpbuf) : (uint32_t)remaining;
-                int got = fat32_read_file(&segf, tmpbuf, chunk);
-                if (got <= 0) { kfree(phdrs); return -18; }
-                // copy into target virtual address (requires mapping newproc and writing into physical page memory)
-                uint64_t dest_v = seg_vaddr + file_off;
-                uint64_t page_base = page_round_down(dest_v);
-                uint64_t offset_in_page = dest_v - page_base;
-                // Find physical page mapped at page_base by temporarily switching to newproc
-                uint64_t cr3save = vmm_get_cr3();
+            uint64_t offset = 0;
+            while (remaining > 0) {
+                int r = (remaining > 512) ? 512 : remaining;
+                int got = fat32_read_file(&segf, tmp, r);
+
+                uint64_t target_va = seg_vaddr + offset;
+
+                // Find the physical page backing target_va in the new proc page tables
                 vmm_set_cr3(newproc->cr3);
-                // get physical address from page table
-                uint64_t *pml4 = (uint64_t *)(uintptr_t)vmm_get_cr3();
-                // We know vmm_map_page set the page tables; but easier: compute physical using the identity mapping of physical pages in kernel region: allocated page pointer equals physical address and is directly usable via pointer (pmm_alloc_page returned physical address that is identity-mapped).
-                // So we can compute the kernel-accessible pointer as (void*)(uintptr_t)( (pte physical) ) but we don't easily get pte here. Simpler: we used pmm_alloc_page earlier and filled those pages with zeros; since pmm_alloc_page returns physical address which is identity-mapped in this kernel, we can write to that physical address directly.
-                // Therefore compute kernel pointer = (void*)(uintptr_t)dest_phys where dest_phys = (value we mapped). But we don't have stored mapping of which physical page corresponded to which vaddr. To avoid complexity, instead write into page by calculating physical base from vmm page tables: walk tables to get entry
-                uint64_t dest_phys = 0;
-                // walk page tables
-                uint64_t *pml4e = (uint64_t *)(uintptr_t)vmm_get_cr3();
-                size_t i4 = (page_base >> 39) & 0x1FF;
-                uint64_t pml4val = pml4e[i4];
-                if (!(pml4val & VMM_PFLAG_PRESENT)) { vmm_set_cr3(cr3save); kfree(phdrs); return -19; }
-                uint64_t *pdpe = (uint64_t *)(uintptr_t)(pml4val & 0x000ffffffffff000ULL);
-                size_t i3 = (page_base >> 30) & 0x1FF;
-                uint64_t pdpval = pdpe[i3];
-                if (!(pdpval & VMM_PFLAG_PRESENT)) { vmm_set_cr3(cr3save); kfree(phdrs); return -20; }
-                uint64_t *pde = (uint64_t *)(uintptr_t)(pdpval & 0x000ffffffffff000ULL);
-                size_t i2 = (page_base >> 21) & 0x1FF;
-                uint64_t pdeval = pde[i2];
-                if (!(pdeval & VMM_PFLAG_PRESENT)) { vmm_set_cr3(cr3save); kfree(phdrs); return -21; }
-                uint64_t *pte = (uint64_t *)(uintptr_t)(pdeval & 0x000ffffffffff000ULL);
-                size_t i1 = (page_base >> 12) & 0x1FF;
-                uint64_t pteval = pte[i1];
-                if (!(pteval & VMM_PFLAG_PRESENT)) { vmm_set_cr3(cr3save); kfree(phdrs); return -22; }
-                dest_phys = pteval & 0x000ffffffffff000ULL;
-                void *kptr = (void *)(uintptr_t)dest_phys;
-                // copy chunk to kptr + offset_in_page
-                local_memcpy((char*)kptr + offset_in_page, tmpbuf, got);
-                vmm_set_cr3(cr3save);
+                const uint64_t KERNEL_PHYS_OFFSET = 0xFFFF800000000000ULL;
+                uint64_t *pml4 = (uint64_t*)(uintptr_t)(vmm_get_cr3() + KERNEL_PHYS_OFFSET);
+                uint64_t pml4e = pml4[(target_va >> 39) & 0x1FF];
+                uint64_t *pdp = (uint64_t*)(uintptr_t)(pml4e & 0xFFFFFFFFFF000ULL);
+                uint64_t pdpe = pdp[(target_va >> 30) & 0x1FF];
+                uint64_t *pd = (uint64_t*)(uintptr_t)(pdpe & 0xFFFFFFFFFF000ULL);
+                uint64_t pde = pd[(target_va >> 21) & 0x1FF];
+                uint64_t *pt = (uint64_t*)(uintptr_t)(pde & 0xFFFFFFFFFF000ULL);
+                uint64_t pte = pt[(target_va >> 12) & 0x1FF];
+                uint64_t phys_page = pte & 0xFFFFFFFFFF000ULL;
+                vmm_set_cr3(orig_cr3);
+
+                if (phys_page == 0) {
+                    remaining -= got;
+                    offset += got;
+                    continue;
+                }
+
+                const uint64_t KERNEL_TEMP_VA = 0xFFFF800000F00000ULL;
+                // Map the physical page into kernel virtual space so we can write into it
+                vmm_set_cr3(orig_cr3);
+                tty_putstr("[ELF DBG] mapping temp VA "); tty_puthex64(KERNEL_TEMP_VA);
+                tty_putstr(" -> phys "); tty_puthex64(phys_page); tty_putstr("\n");
+                if (vmm_map_page(KERNEL_TEMP_VA, phys_page, VMM_PFLAG_WRITE) != 0) {
+                    tty_putstr("[ELF DBG] vmm_map_page failed\n");
+                    remaining -= got;
+                    offset += got;
+                    continue;
+                }
+                // Verify mapping by walking kernel page tables
+                {
+                    const uint64_t KOFFSET = 0xFFFF800000000000ULL;
+                    uint64_t cr3kv = vmm_get_cr3() + KOFFSET;
+                    uint64_t *pml4 = (uint64_t *)(uintptr_t)cr3kv;
+                    size_t i4 = (KERNEL_TEMP_VA >> 39) & 0x1FF;
+                    uint64_t pml4e = pml4[i4];
+                    tty_putstr("[ELF DBG] pml4e="); tty_puthex64(pml4e); tty_putstr("\n");
+                }
+                local_memcpy((void*)(uintptr_t)(KERNEL_TEMP_VA + (target_va & 0xFFF)), tmp, got);
+                vmm_unmap_page(KERNEL_TEMP_VA);
 
                 remaining -= got;
-                file_off += got;
-            }
-            // Zero remaining bss portion (p_memsz - p_filesz)
-            if (ph->p_memsz > ph->p_filesz) {
-                uint64_t bss_start = seg_vaddr + ph->p_filesz;
-                uint64_t bss_end = seg_vaddr + ph->p_memsz;
-                uint64_t cur = bss_start;
-                while (cur < bss_end) {
-                    uint64_t page_base = page_round_down(cur);
-                    uint64_t offset_in_page = cur - page_base;
-                    uint64_t tozero = (bss_end - cur);
-                    if (tozero > PAGE_SIZE - offset_in_page) tozero = PAGE_SIZE - offset_in_page;
-                    uint64_t cr3save = vmm_get_cr3();
-                    vmm_set_cr3(newproc->cr3);
-                    // walk to get phys
-                    uint64_t *pml4e = (uint64_t *)(uintptr_t)vmm_get_cr3();
-                    size_t i4 = (page_base >> 39) & 0x1FF;
-                    uint64_t pml4val = pml4e[i4];
-                    uint64_t *pdpe = (uint64_t *)(uintptr_t)(pml4val & 0x000ffffffffff000ULL);
-                    size_t i3 = (page_base >> 30) & 0x1FF;
-                    uint64_t pdpval = pdpe[i3];
-                    uint64_t *pde = (uint64_t *)(uintptr_t)(pdpval & 0x000ffffffffff000ULL);
-                    size_t i2 = (page_base >> 21) & 0x1FF;
-                    uint64_t pdeval = pde[i2];
-                    uint64_t *pte = (uint64_t *)(uintptr_t)(pdeval & 0x000ffffffffff000ULL);
-                    size_t i1 = (page_base >> 12) & 0x1FF;
-                    uint64_t pteval = pte[i1];
-                    uint64_t dest_phys = pteval & 0x000ffffffffff000ULL;
-                    void *kptr = (void *)(uintptr_t)dest_phys;
-                    local_memset((char*)kptr + offset_in_page, 0, tozero);
-                    vmm_set_cr3(cr3save);
-                    cur += tozero;
-                }
+                offset += got;
             }
         }
+        vmm_set_cr3(orig_cr3);
     }
 
-    // Set entry point (add base for ET_DYN)
-    newproc->entry = ehdr.e_entry + (ehdr.e_type == ET_DYN ? base : 0);
+    newproc->entry = ehdr.e_entry + base;
 
-    // Build user stack and set newproc->user_rsp
-    uint64_t user_rsp = build_user_stack(newproc, argv, envp);
-    if (!user_rsp) {
+    // FIX: Use the RSP returned by build_user_stack, do NOT overwrite it with top-of-page.
+    newproc->user_rsp = build_user_stack(newproc, argv, envp);
+    
+    if (newproc->user_rsp == 0) {
         kfree(phdrs);
         return -23;
     }
-    newproc->user_rsp = user_rsp;
 
     kfree(phdrs);
     return 0;

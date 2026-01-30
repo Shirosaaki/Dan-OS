@@ -2,6 +2,8 @@
 global idt_load
 
 section .text
+extern tty_putstr
+extern tty_puthex64
 bits 64
 
 ; Load IDT
@@ -125,7 +127,13 @@ isr_common_stub:
 
     ; Get interrupt number from stack (now at rsp+120)
     mov rdi, [rsp + 120]
-    
+
+    ; Get error code from stack (now at rsp+128)
+    mov rsi, [rsp + 128]
+
+    ; Pass pointer to CPU-saved frame (starts at rsp+136) as 3rd arg
+    lea rdx, [rsp + 136]
+
     ; Call C handler
     call isr_handler
 
@@ -155,6 +163,9 @@ isr_common_stub:
 extern irq_handler
 extern scheduler_switch
 
+    ; External symbol for scheduler to set next CR3
+    extern sched_next_cr3
+
 ; Common IRQ stub
 irq_common_stub:
     ; Save all registers
@@ -183,8 +194,27 @@ irq_common_stub:
     ; Pass pointer to saved registers (current rsp) to scheduler and get new rsp in rax
     mov rdi, rsp
     call scheduler_switch
-    ; If scheduler returned a different saved-registers pointer, switch stack to it
+    ; If scheduler returned a different saved-registers pointer, switch stack to it and load CR3
+    cmp rax, rdi
+    je no_switch
     mov rsp, rax
+
+    ; Check if the task is user mode (CS = 0x1B)
+    mov rbx, [rsp + 144]  ; CS is at rsp + 144 (18*8)
+    cmp rbx, 0x1B
+    jne no_load_cr3
+
+    ; Load new CR3 if set
+    mov rax, [sched_next_cr3]
+    test rax, rax
+    je no_load_cr3
+    mov cr3, rax
+    ; clear it
+    xor rax, rax
+    mov [sched_next_cr3], rax
+
+no_load_cr3:
+no_switch:
 
     ; Restore all registers
     pop r15
@@ -206,5 +236,48 @@ irq_common_stub:
     ; Clean up error code and IRQ number
     add rsp, 16
 
+    ; If scheduler set a next CR3, load it now (before iretq)
+    mov rax, [sched_next_cr3]
+    test rax, rax
+    je no_cr3_load
+    mov cr3, rax
+    ; clear it (write zero)
+    xor rax, rax
+    mov [sched_next_cr3], rax
+no_cr3_load:
+
+    ; Debug: print stack pointer and values about to be restored for user mode
+    ; After pops and add rsp,16, rsp points at the IRET frame (RIP, CS, RFLAGS, RSP, SS)
+    mov rax, [rsp + 0]   ; RIP
+    mov rbx, [rsp + 8]   ; CS
+    mov rcx, [rsp + 16]  ; RFLAGS
+    mov rdx, [rsp + 24]  ; RSP
+    mov rsi, [rsp + 32]  ; SS
+    ; Only print if CS == 0x1B (user mode)
+    cmp rbx, 0x1B
+    jne .no_user_debug
+    push rdi
+    push rsi
+    push rdx
+    push rcx
+    push rbx
+    push rax
+    mov rdi, debug_msg
+    call tty_putstr
+    mov rdi, rax
+    call tty_puthex64
+    mov rdi, newline
+    call tty_putstr
+    pop rax
+    pop rbx
+    pop rcx
+    pop rdx
+    pop rsi
+    pop rdi
+.no_user_debug:
     ; Return from interrupt
     iretq
+
+section .rodata
+debug_msg: db '[IRETQ DEBUG] RIP about to restore: ',0
+newline: db 10,0

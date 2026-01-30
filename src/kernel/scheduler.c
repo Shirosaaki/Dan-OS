@@ -9,6 +9,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+extern uint64_t temp_kernel_rsp;
+
 // Simple round-robin scheduler for kernel threads and user processes
 
 typedef enum { TASK_UNUSED = 0, TASK_RUNNABLE, TASK_RUNNING, TASK_ZOMBIE } task_state_t;
@@ -72,9 +74,9 @@ int scheduler_add_task(void (*func)(void)) {
     for (int i = 0; i < 15; ++i) sp[i] = 0;
     // place function pointer into rdi position (index 5) so wrapper can pick it up
     sp[5] = (uint64_t)func; // rdi
-    // error code and int_no
-    sp[15] = 0; // error code
-    sp[16] = 32; // int_no - we mark as timer so handler logic is consistent
+    // int_no and error code (match IRQ stub push order: push 0; push IRQ -> IRQ at lower address)
+    sp[15] = 32; // int_no - we mark as timer so handler logic is consistent
+    sp[16] = 0; // error code
     // RIP, CS, RFLAGS for iretq
     extern void task_start_wrapper(void);
     sp[17] = (uint64_t)task_start_wrapper; // RIP
@@ -102,6 +104,14 @@ int scheduler_add_task(void (*func)(void)) {
 }
 
 int scheduler_create_user_process(void *entry_point, void *user_stack_top, uint64_t cr3) {
+        tty_putstr("[SCHED DBG] scheduler_create_user_process called\n");
+        tty_putstr("  entry_point: ");
+        tty_puthex64((uint64_t)entry_point);
+        tty_putstr("\n  user_stack_top: ");
+        tty_puthex64((uint64_t)user_stack_top);
+        tty_putstr("\n  cr3: ");
+        tty_puthex64(cr3);
+        tty_putstr("\n");
     // allocate task struct
     task_struct_t *t = (task_struct_t *)kmalloc(sizeof(task_struct_t));
     if (!t) {
@@ -118,27 +128,23 @@ int scheduler_create_user_process(void *entry_point, void *user_stack_top, uint6
     }
     t->stack_base = stack;
 
+
     // Build initial kernel stack for context switch
-    // When we switch to this process, we need to iretq to user mode
+    // Layout must match what irq_common_stub expects:
+    // [rax, rbx, rcx, rdx, rsi, rdi, rbp, r8, r9, r10, r11, r12, r13, r14, r15, error, int_no, RIP, CS, RFLAGS, RSP, SS]
     uint64_t *stack_top = (uint64_t *)((char*)stack + 4096);
     stack_top = (uint64_t *)((uintptr_t)stack_top & ~0xF);
-    // Space for saved regs (15*8=120), error(8), int_no(8), RIP(8), CS(8), RFLAGS(8), RSP(8), SS(8) = 176 bytes -> 22 uint64_t
     stack_top -= 22;
     uint64_t *sp = stack_top;
-
-    // Zero saved registers
-    for (int i = 0; i < 15; ++i) sp[i] = 0;
-
-    // Error code and int_no
-    sp[15] = 0; // error code
-    sp[16] = 32; // int_no
-
-    // For iretq: RIP, CS, RFLAGS, RSP, SS
-    sp[17] = (uint64_t)entry_point;    // user RIP
-    sp[18] = 0x18 | 3;     // user code segment (ring 3)
-    sp[19] = 0x202;        // RFLAGS with interrupts enabled
-    sp[20] = (uint64_t)user_stack_top; // user RSP
-    sp[21] = 0x20 | 3;     // user data segment (ring 3)
+    for (int i = 0; i < 15; ++i) sp[i] = 0; // rax..r15
+    // Match IRQ push order: int_no then error
+    sp[15] = 32; // int_no (timer)
+    sp[16] = 0; // error code
+    sp[17] = (uint64_t)entry_point; // RIP
+    sp[18] = 0x1B; // CS (user code segment)
+    sp[19] = 0x202; // RFLAGS
+    sp[20] = (uint64_t)user_stack_top; // RSP (user stack pointer)
+    sp[21] = 0x23; // SS (user data segment)
 
     t->type = TASK_USER;
     t->rsp = (uint64_t)sp;
@@ -177,6 +183,9 @@ static __attribute__((noreturn)) void task_trampoline_c(void (*func)(void)) {
 }
 
 // The low-level entry `task_start_wrapper` is implemented in assembly in task_trampoline.S
+
+// Forward declare global for next CR3 to be consumed by IRQ stub
+uint64_t sched_next_cr3 = 0;
 
 // scheduler_switch: called with 'regs' pointing to saved registers area (rsp). Return pointer to regs for next task
 void *scheduler_switch(void *regs) {
@@ -222,20 +231,27 @@ void *scheduler_switch(void *regs) {
     }
     if (!t) return regs;
 
-    // switch CR3 if different
-    if (t->cr3 != vmm_get_cr3()) {
-        vmm_set_cr3(t->cr3);
-    }
+    // Prepare new CR3 in global variable so assembly stub can load it at the right moment
+    extern uint64_t sched_next_cr3;
+    sched_next_cr3 = t->cr3;
 
     // For user processes, set TSS RSP0 to the kernel stack
     if (t->type == TASK_USER) {
         uint64_t kernel_stack_top = (uint64_t)t->stack_base + 4096;
+        
         tss_set_stack(kernel_stack_top);
+        
+        // CRITICAL: Update the variable used by syscall_entry.S
+        temp_kernel_rsp = kernel_stack_top;
+        
+        // Set segment registers for user mode
+        __asm__ volatile("mov $0x23, %%ax; mov %%ax, %%ds; mov %%ax, %%es; mov %%ax, %%fs; mov %%ax, %%gs" : : : "ax", "memory");
     }
 
     t->state = TASK_RUNNING;
     current = t;
-
-    // return pointer to next task's saved regs
+    return (void *)t->rsp;
+    t->state = TASK_RUNNING;
+    current = t;
     return (void *)t->rsp;
 }
