@@ -129,15 +129,66 @@ int vmm_unmap_page(uint64_t vaddr) {
 }
 
 uint64_t vmm_clone_table(uint64_t src_cr3) {
-    // Shallow clone: allocate new PML4 and copy entries. 
-    // Does not clone lower levels (they remain shared).
-    uint64_t *src = (uint64_t *)(uintptr_t)src_cr3;
-    uint64_t *new_table = alloc_table();
-    if (!new_table) return 0;
+    // Create a fresh PML4 for user process with NO kernel mappings
+    // This prevents user code from accessing kernel memory
+    uint64_t *new_pml4 = alloc_table();
+    if (!new_pml4) return 0;
 
-    for (int i = 0; i < ENTRIES_PER_TABLE; ++i) {
-        new_table[i] = src[i];
+    // Start with a completely empty page table
+    // User processes will explicitly map what they need via ELF loader
+    // We do NOT copy kernel mappings - this is more secure
+    
+    return (uint64_t)(uintptr_t)new_pml4;
+}
+
+// Map a page in a DIFFERENT page table (specified by target_cr3) without switching CR3
+// This is needed because we can't switch to the new process's CR3 to modify its page tables
+// (since the new page tables might not have identity mapping for themselves)
+int vmm_map_page_in_table(uint64_t target_cr3, uint64_t vaddr, uint64_t paddr, uint64_t flags) {
+    // We'll walk the target page table using physical addresses
+    // Since the kernel has identity mapping in low memory, we can access physical addresses directly
+    
+    uint64_t *pml4 = (uint64_t *)(uintptr_t)target_cr3;
+    
+    // Get or create PDP
+    size_t i4 = idx_pml4(vaddr);
+    uint64_t *pdp;
+    if (pml4[i4] & VMM_PFLAG_PRESENT) {
+        pml4[i4] |= (VMM_PFLAG_USER | VMM_PFLAG_WRITE);
+        pdp = (uint64_t *)(uintptr_t)(pml4[i4] & ENTRY_ADDR_MASK);
+    } else {
+        pdp = alloc_table();
+        if (!pdp) return -1;
+        pml4[i4] = ((uint64_t)(uintptr_t)pdp & ENTRY_ADDR_MASK) | VMM_PFLAG_PRESENT | VMM_PFLAG_WRITE | VMM_PFLAG_USER;
     }
-
-    return (uint64_t)(uintptr_t)new_table;
+    
+    // Get or create PD
+    size_t i3 = idx_pdp(vaddr);
+    uint64_t *pd;
+    if (pdp[i3] & VMM_PFLAG_PRESENT) {
+        pdp[i3] |= (VMM_PFLAG_USER | VMM_PFLAG_WRITE);
+        pd = (uint64_t *)(uintptr_t)(pdp[i3] & ENTRY_ADDR_MASK);
+    } else {
+        pd = alloc_table();
+        if (!pd) return -1;
+        pdp[i3] = ((uint64_t)(uintptr_t)pd & ENTRY_ADDR_MASK) | VMM_PFLAG_PRESENT | VMM_PFLAG_WRITE | VMM_PFLAG_USER;
+    }
+    
+    // Get or create PT
+    size_t i2 = idx_pd(vaddr);
+    uint64_t *pt;
+    if (pd[i2] & VMM_PFLAG_PRESENT) {
+        pd[i2] |= (VMM_PFLAG_USER | VMM_PFLAG_WRITE);
+        pt = (uint64_t *)(uintptr_t)(pd[i2] & ENTRY_ADDR_MASK);
+    } else {
+        pt = alloc_table();
+        if (!pt) return -1;
+        pd[i2] = ((uint64_t)(uintptr_t)pt & ENTRY_ADDR_MASK) | VMM_PFLAG_PRESENT | VMM_PFLAG_WRITE | VMM_PFLAG_USER;
+    }
+    
+    // Set the leaf PTE
+    size_t i1 = idx_pt(vaddr);
+    pt[i1] = (paddr & ENTRY_ADDR_MASK) | (flags & 0xFFF) | VMM_PFLAG_PRESENT;
+    
+    return 0;
 }

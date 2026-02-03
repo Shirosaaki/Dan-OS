@@ -17,6 +17,18 @@ SECTIONS
     {
         *(.text)
     }
+    .rodata :
+    {
+        *(.rodata)
+    }
+    .data :
+    {
+        *(.data)
+    }
+    .bss :
+    {
+        *(.bss)
+    }
     __kernel_end = .;
     _kernel_end = __kernel_end;
 }

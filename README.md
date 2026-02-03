@@ -41,6 +41,23 @@ Remove the build-evironment image:
 
 - `docker rmi dan-os -f`
 
+## Make a disk image
+
+You can create a disk image to test FAT32 file system support:
+```
+dd if=/dev/zero of=disk.img bs=1M count=100        # Create a 100MB disk image
+mkfs.fat -F 32 disk.img                  # Format the disk image as FAT32
+```
+
+## Compile .c and send it to FAT32 disk image
+
+You can compile a C file and send the resulting binary to the FAT32 disk image:
+```
+x86_64-elf-gcc -ffreestanding -nostdlib -fno-stack-protector -c test/test.c -o test/test.o
+x86_64-elf-ld -Ttext 0x400000 -e _start -o test.elf test/test.o
+mcopy -i disk.img test.elf ::/test.elf
+```
+
 ## License
 
 This project is licensed under the GNU GENERAL PUBLIC LICENSE - see the [LICENSE](LICENSE) file for details.

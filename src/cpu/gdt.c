@@ -35,11 +35,14 @@ void gdt_init() {
     // Kernel data segment (ring 0, data): access=0x92, flags upper nibble=(G=1,D/B=1)->0xC
     gdt[2] = build_desc(0, 0xFFFF, 0x92, 0xC);
 
-    // User code segment (ring 3, executable, 64-bit): access=0xFA (DPL=3)
-    gdt[3] = build_desc(0, 0xFFFF, 0xFA, 0xA);
-
     // User data segment (ring 3, data): access=0xF2 (DPL=3)
-    gdt[4] = build_desc(0, 0xFFFF, 0xF2, 0xC);
+    // Placed at index 3 to support SYSRET (expects SS at Base+8 = 16+8 = 24? No. Base=0x10. SS=0x18, CS=0x20)
+    // Wait. If Base=0x10. Base+8 = 0x18 => Index 3. Base+16=0x20 => Index 4.
+    // So Index 3 MUST be User Data. Index 4 MUST be User Code.
+    gdt[3] = build_desc(0, 0xFFFF, 0xF2, 0xC);
+
+    // User code segment (ring 3, executable, 64-bit): access=0xFA (DPL=3)
+    gdt[4] = build_desc(0, 0xFFFF, 0xFA, 0xA);
 
     // TSS descriptor (spans two entries)
     uint64_t tss_base = (uint64_t)&tss;

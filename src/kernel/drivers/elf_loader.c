@@ -8,308 +8,236 @@
 #include <stdint.h>
 #include <stddef.h>
 
-// ELF types and structures are provided by include/kernel/drivers/elf.h
-// PT_LOAD remains defined here for program header type
 #define PT_LOAD 1
-
 #define ELFMAG0 0x7F
 #define ELFMAG1 'E'
 #define ELFMAG2 'L'
 #define ELFMAG3 'F'
 #define ELFCLASS64 2
-#define ELFDATA2LSB 1
-#define ET_EXEC 2
-#define ET_DYN 3
-
-#define AT_NULL 0
-#define AT_PHDR 3
-#define AT_PHENT 4
-#define AT_PHNUM 5
-#define AT_PAGESZ 6
-#define AT_ENTRY 9
-
 #define PAGE_SIZE 4096
 
-// Protection flags mapping: we will map user pages with USER and optionally WRITE
-static uint64_t elf_phdr_prot_to_vmm_flags(uint32_t p_flags) {
-    uint64_t flags = VMM_PFLAG_USER | VMM_PFLAG_PRESENT;
-    if (p_flags & 0x2) flags |= VMM_PFLAG_WRITE;
-    return flags;
+// Simple page allocation tracker
+typedef struct {
+    uint64_t va;
+    uint64_t pa;
+} va_pa_mapping_t;
+
+#define MAX_SEGMENTS 16
+static va_pa_mapping_t segment_map[MAX_SEGMENTS];
+static int segment_count = 0;
+
+static void map_add(uint64_t va, uint64_t pa) {
+    if (segment_count < MAX_SEGMENTS) {
+        segment_map[segment_count].va = va;
+        segment_map[segment_count].pa = pa;
+        segment_count++;
+    }
 }
 
-// Helper: round down/up to PAGE_SIZE
-static inline uint64_t page_round_down(uint64_t v) { return v & ~(PAGE_SIZE - 1); }
-static inline uint64_t page_round_up(uint64_t v) { return (v + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1); }
-
-// Simple memcpy/memset/strlen implementations to avoid relying on libc
-static void *local_memcpy(void *dst, const void *src, size_t n) {
-    unsigned char *d = (unsigned char *)dst;
-    const unsigned char *s = (const unsigned char *)src;
-    for (size_t i = 0; i < n; ++i) d[i] = s[i];
-    return dst;
-}
-static void *local_memset(void *s, int c, size_t n) {
-    unsigned char *p = (unsigned char *)s;
-    for (size_t i = 0; i < n; ++i) p[i] = (unsigned char)c;
-    return s;
-}
-static size_t local_strlen(const char *s) {
-    extern int strlength(const char* str);
-    return (size_t)strlength(s);
-}
-
-// Build a user stack in kernel memory and map into newproc address space
-// Returns virtual user stack pointer (rsp) on success, 0 on failure
-static uint64_t build_user_stack(struct proc *newproc, char *const argv[], char *const envp[]) {
-    // 1. Allocate a physical page for the stack
-    void *stack_page = pmm_alloc_page();
-    if (!stack_page) {
-        tty_putstr("[ELF] pmm_alloc_page for stack failed\n");
-        return 0;
+static uint64_t map_lookup(uint64_t va) {
+    for (int i = 0; i < segment_count; i++) {
+        uint64_t page_va = segment_map[i].va & ~(PAGE_SIZE - 1);
+        uint64_t va_page = va & ~(PAGE_SIZE - 1);
+        if (page_va == va_page) {
+            return segment_map[i].pa + (va & (PAGE_SIZE - 1));
+        }
     }
-
-    // 2. Define the Virtual Address for the stack page.
-    // We map the page at 0x7FFFFFFFF000. 
-    // The top of the stack will be at 0x800000000000 (end of this page).
-    uint64_t user_stack_page_base = 0x00007FFFFFFFF000ULL;
-    uint64_t user_stack_top_limit = user_stack_page_base + PAGE_SIZE;
-
-    // 3. Map it into the user process address space
-    uint64_t orig_cr3 = vmm_get_cr3();
-    vmm_set_cr3(newproc->cr3);
-    if (vmm_map_page(user_stack_page_base, (uint64_t)(uintptr_t)stack_page, VMM_PFLAG_USER | VMM_PFLAG_WRITE) != 0) {
-        vmm_set_cr3(orig_cr3);
-        return 0;
-    }
-    vmm_set_cr3(orig_cr3);
-
-    // 4. Populate stack data: map the physical page into a temporary kernel VA so we can write to it
-    const uint64_t KERNEL_TEMP_VA = 0xFFFF800000F00000ULL;
-    vmm_set_cr3(orig_cr3);
-    if (vmm_map_page(KERNEL_TEMP_VA, (uint64_t)(uintptr_t)stack_page, VMM_PFLAG_WRITE) != 0) {
-        // cleanup mapping in newproc
-        vmm_set_cr3(newproc->cr3);
-        vmm_unmap_page(user_stack_page_base);
-        vmm_set_cr3(orig_cr3);
-        return 0;
-    }
-    void *kstack_base = (void *)(uintptr_t)KERNEL_TEMP_VA;
-    local_memset(kstack_base, 0, PAGE_SIZE);
-
-    // sp represents the current stack pointer value (Virtual Address)
-    // We start at the very top of the allocated page.
-    uint64_t sp = user_stack_top_limit;
-
-    // Helper macro to calculate offset within the kernel page
-    #define KSTACK_PTR(virt_addr) ((char*)kstack_base + ((virt_addr) - user_stack_page_base))
-
-    // Helper to push 64-bit value
-    #define PUSH_U64(x) do { \
-        sp -= 8; \
-        *(uint64_t *)KSTACK_PTR(sp) = (uint64_t)(x); \
-    } while(0)
-
-    // Calculate counts
-    int argc = 0;
-    while (argv && argv[argc]) argc++;
-    int envc = 0;
-    while (envp && envp[envc]) envc++;
-
-    // --- Push Strings (argv/envp data) ---
-    // We allocate temporary arrays to hold the pointers to these strings
-    uint64_t *argv_ptrs = (uint64_t *)kmalloc((argc + 1) * sizeof(uint64_t));
-    uint64_t *envp_ptrs = (uint64_t *)kmalloc((envc + 1) * sizeof(uint64_t));
-    
-    // Push environment strings
-    for (int i = envc - 1; i >= 0; --i) {
-        size_t l = local_strlen(envp[i]) + 1;
-        sp -= l;
-        sp &= ~0xF; // Align strings? Not strictly required by ABI but good practice or just align 1
-        local_memcpy(KSTACK_PTR(sp), envp[i], l);
-        envp_ptrs[i] = sp;
-    }
-    
-    // Push argument strings
-    for (int i = argc - 1; i >= 0; --i) {
-        size_t l = local_strlen(argv[i]) + 1;
-        sp -= l;
-        sp &= ~0xF; 
-        local_memcpy(KSTACK_PTR(sp), argv[i], l);
-        argv_ptrs[i] = sp;
-    }
-
-    // Align stack pointer to 16 bytes before pushing array pointers
-    sp &= ~0xF;
-
-    // --- Push Auxv ---
-    // (AT_NULL must be at the bottom of aux array)
-    PUSH_U64(0); PUSH_U64(AT_NULL);
-    PUSH_U64(PAGE_SIZE); PUSH_U64(AT_PAGESZ);
-    PUSH_U64(newproc->entry); PUSH_U64(AT_ENTRY);
-    
-    // --- Push Envp Pointers ---
-    PUSH_U64(0); // NULL terminator
-    for (int i = envc - 1; i >= 0; --i) PUSH_U64(envp_ptrs[i]);
-
-    // --- Push Argv Pointers ---
-    PUSH_U64(0); // NULL terminator
-    for (int i = argc - 1; i >= 0; --i) PUSH_U64(argv_ptrs[i]);
-
-    // --- Push Argc ---
-    PUSH_U64(argc);
-
-    // Cleanup
-    if (argv_ptrs) kfree(argv_ptrs);
-    if (envp_ptrs) kfree(envp_ptrs);
-
-    // Unmap temporary kernel mapping
-    vmm_unmap_page(KERNEL_TEMP_VA);
-
-    return sp;
+    return 0;
 }
 
 int elf_load_and_create_address_space(const char *path, char *const argv[], char *const envp[], struct proc *newproc) {
+    tty_putstr("[ELF] Loading: ");
+    tty_putstr(path);
+    tty_putstr("\n");
+
     if (!path || !newproc) return -1;
 
+    segment_count = 0;  // Reset mapping
+
+    // Open and read ELF header
     fat32_file_t file;
-    if (fat32_open_file((const char *)path, &file) != 0) {
-        tty_putstr("elf: file open failed\n");
+    if (fat32_open_file(path, &file) != 0) {
+        tty_putstr("[ELF] File open failed\n");
         return -2;
     }
 
     Elf64_Ehdr ehdr;
-    if (fat32_read_file(&file, (uint8_t*)&ehdr, sizeof(Elf64_Ehdr)) != (int)sizeof(Elf64_Ehdr)) {
+    if (fat32_read_file(&file, (uint8_t*)&ehdr, sizeof(Elf64_Ehdr)) != sizeof(Elf64_Ehdr)) {
+        tty_putstr("[ELF] Header read failed\n");
         return -3;
     }
 
+    // Validate ELF header
     if (ehdr.e_ident[0] != ELFMAG0 || ehdr.e_ident[1] != ELFMAG1 || 
-        ehdr.e_ident[2] != ELFMAG2 || ehdr.e_ident[3] != ELFMAG3) return -4;
-    if (ehdr.e_ident[4] != ELFCLASS64) return -5;
+        ehdr.e_ident[2] != ELFMAG2 || ehdr.e_ident[3] != ELFMAG3) {
+        tty_putstr("[ELF] Invalid magic\n");
+        return -4;
+    }
+    if (ehdr.e_ident[4] != ELFCLASS64) {
+        tty_putstr("[ELF] Not 64-bit\n");
+        return -5;
+    }
 
-    uint64_t orig_cr3 = vmm_get_cr3();
-    uint64_t new_cr3 = vmm_clone_table(orig_cr3);
-    if (!new_cr3) return -8;
-    newproc->cr3 = new_cr3;
+    tty_putstr("[ELF] Entry: ");
+    tty_puthex64(ehdr.e_entry);
+    tty_putstr("\n");
 
-    uint64_t base = (ehdr.e_type == ET_DYN) ? 0x400000 : 0;
+    // Get kernel CR3 and clone it for user process
+    uint64_t kernel_cr3 = vmm_get_cr3();
+    uint64_t user_cr3 = vmm_clone_table(kernel_cr3);
+    if (!user_cr3) {
+        tty_putstr("[ELF] Clone table failed\n");
+        return -6;
+    }
+    newproc->cr3 = user_cr3;
 
-    size_t phdr_tbl_size = ehdr.e_phnum * ehdr.e_phentsize;
-    Elf64_Phdr *phdrs = (Elf64_Phdr *)kmalloc(phdr_tbl_size);
-    if (!phdrs) return -11;
+    // Read program headers
+    size_t phdr_size = ehdr.e_phnum * ehdr.e_phentsize;
+    Elf64_Phdr *phdrs = (Elf64_Phdr *)kmalloc(phdr_size);
+    if (!phdrs) {
+        tty_putstr("[ELF] Phdr malloc failed\n");
+        return -7;
+    }
 
-    fat32_open_file(path, &file); // Reopen to reset offset
-    
-    // Skip to Program Headers
-    if (ehdr.e_phoff) {
-        uint8_t tmp[256];
+    // Seek to program headers
+    fat32_file_t file2;
+    fat32_open_file(path, &file2);
+    if (ehdr.e_phoff > 0) {
+        uint8_t skipbuf[512];
         uint64_t skip = ehdr.e_phoff;
-        while(skip > 0) {
-            int r = (skip > 256) ? 256 : skip;
-            fat32_read_file(&file, tmp, r);
-            skip -= r;
+        while (skip > 0) {
+            int to_skip = (skip > 512) ? 512 : skip;
+            fat32_read_file(&file2, skipbuf, to_skip);
+            skip -= to_skip;
         }
     }
-    fat32_read_file(&file, (uint8_t*)phdrs, phdr_tbl_size);
+    fat32_read_file(&file2, (uint8_t*)phdrs, phdr_size);
 
-    // Load Segments
-    for (int i = 0; i < ehdr.e_phnum; ++i) {
-        Elf64_Phdr *ph = (Elf64_Phdr *)((uintptr_t)phdrs + i * ehdr.e_phentsize);
+    // Process each PT_LOAD segment
+    for (unsigned seg_idx = 0; seg_idx < ehdr.e_phnum; seg_idx++) {
+        Elf64_Phdr *ph = &phdrs[seg_idx];
         if (ph->p_type != PT_LOAD) continue;
 
-        uint64_t seg_vaddr = ph->p_vaddr + base;
-        uint64_t seg_start = page_round_down(seg_vaddr);
-        uint64_t seg_end = page_round_up(seg_vaddr + ph->p_memsz);
+        uint64_t seg_va = ph->p_vaddr;
+        uint64_t seg_end = seg_va + ph->p_memsz;
 
-        // Map pages
-        vmm_set_cr3(newproc->cr3);
-        for (uint64_t va = seg_start; va < seg_end; va += PAGE_SIZE) {
-            void *page = pmm_alloc_page();
-            vmm_map_page(va, (uint64_t)(uintptr_t)page, elf_phdr_prot_to_vmm_flags(ph->p_flags));
-        }
-        vmm_set_cr3(orig_cr3);
+        tty_putstr("[ELF] Load segment: va=");
+        tty_puthex64(seg_va);
+        tty_putstr(" size=");
+        tty_putdec(ph->p_memsz);
+        tty_putstr("\n");
 
-        // Copy Data
-        if (ph->p_filesz > 0) {
-            fat32_file_t segf;
-            fat32_open_file(path, &segf);
-            
-            // Skip to p_offset
-            uint64_t skip = ph->p_offset;
-            uint8_t tmp[512];
-            while(skip > 0) {
-                int r = (skip > 512) ? 512 : skip;
-                fat32_read_file(&segf, tmp, r);
-                skip -= r;
+        // Allocate physical pages for the segment
+        for (uint64_t va = seg_va; va < seg_end; va += PAGE_SIZE) {
+            void *phys = pmm_alloc_page();
+            if (!phys) {
+                tty_putstr("[ELF] PMM alloc failed\n");
+                kfree(phdrs);
+                return -8;
             }
 
+            uint64_t pa = (uint64_t)(uintptr_t)phys;
+            
+            // Zero the page
+            memset_k(phys, 0, PAGE_SIZE);
+
+            // Map it in user page table with proper permissions
+            // For executable segments: READ + EXECUTE (not WRITE) + USER
+            // For writable segments: READ + WRITE + USER
+            uint64_t flags = 0x1 | 0x4;  // PRESENT | USER
+            if (ph->p_flags & 0x2) flags |= 0x2;  // WRITE if needed
+
+            if (vmm_map_page_in_table(user_cr3, va, pa, flags) != 0) {
+                tty_putstr("[ELF] Map page failed at va=");
+                tty_puthex64(va);
+                tty_putstr("\n");
+                kfree(phdrs);
+                return -9;
+            }
+
+            map_add(va, pa);
+        }
+
+        // Copy file data into pages
+        if (ph->p_filesz > 0) {
+            fat32_file_t data_file;
+            fat32_open_file(path, &data_file);
+
+            // Seek to file offset
+            if (ph->p_offset > 0) {
+                uint8_t skipbuf[512];
+                uint64_t skip = ph->p_offset;
+                while (skip > 0) {
+                    int to_skip = (skip > 512) ? 512 : skip;
+                    fat32_read_file(&data_file, skipbuf, to_skip);
+                    skip -= to_skip;
+                }
+            }
+
+            // Copy data
             uint64_t remaining = ph->p_filesz;
-            uint64_t offset = 0;
+            uint8_t data_buf[512];
+
             while (remaining > 0) {
-                int r = (remaining > 512) ? 512 : remaining;
-                int got = fat32_read_file(&segf, tmp, r);
+                int to_read = (remaining > 512) ? 512 : remaining;
+                int got = fat32_read_file(&data_file, data_buf, to_read);
+                if (got <= 0) break;
 
-                uint64_t target_va = seg_vaddr + offset;
-
-                // Find the physical page backing target_va in the new proc page tables
-                vmm_set_cr3(newproc->cr3);
-                const uint64_t KERNEL_PHYS_OFFSET = 0xFFFF800000000000ULL;
-                uint64_t *pml4 = (uint64_t*)(uintptr_t)(vmm_get_cr3() + KERNEL_PHYS_OFFSET);
-                uint64_t pml4e = pml4[(target_va >> 39) & 0x1FF];
-                uint64_t *pdp = (uint64_t*)(uintptr_t)(pml4e & 0xFFFFFFFFFF000ULL);
-                uint64_t pdpe = pdp[(target_va >> 30) & 0x1FF];
-                uint64_t *pd = (uint64_t*)(uintptr_t)(pdpe & 0xFFFFFFFFFF000ULL);
-                uint64_t pde = pd[(target_va >> 21) & 0x1FF];
-                uint64_t *pt = (uint64_t*)(uintptr_t)(pde & 0xFFFFFFFFFF000ULL);
-                uint64_t pte = pt[(target_va >> 12) & 0x1FF];
-                uint64_t phys_page = pte & 0xFFFFFFFFFF000ULL;
-                vmm_set_cr3(orig_cr3);
-
-                if (phys_page == 0) {
+                // Find where in virtual address space we are
+                uint64_t file_va = seg_va + (ph->p_filesz - remaining);
+                
+                // Look up physical address
+                uint64_t file_pa = map_lookup(file_va);
+                if (!file_pa) {
+                    tty_putstr("[ELF] VA not mapped: ");
+                    tty_puthex64(file_va);
+                    tty_putstr("\n");
                     remaining -= got;
-                    offset += got;
                     continue;
                 }
 
-                const uint64_t KERNEL_TEMP_VA = 0xFFFF800000F00000ULL;
-                // Map the physical page into kernel virtual space so we can write into it
-                vmm_set_cr3(orig_cr3);
-                tty_putstr("[ELF DBG] mapping temp VA "); tty_puthex64(KERNEL_TEMP_VA);
-                tty_putstr(" -> phys "); tty_puthex64(phys_page); tty_putstr("\n");
-                if (vmm_map_page(KERNEL_TEMP_VA, phys_page, VMM_PFLAG_WRITE) != 0) {
-                    tty_putstr("[ELF DBG] vmm_map_page failed\n");
-                    remaining -= got;
-                    offset += got;
-                    continue;
+                // Copy to physical address (kernel identity-mapped)
+                uint8_t *dest = (uint8_t *)(uintptr_t)file_pa;
+                memset_k(dest, 0, got);  // Clear first
+                for (int i = 0; i < got; i++) {
+                    dest[i] = data_buf[i];
                 }
-                // Verify mapping by walking kernel page tables
-                {
-                    const uint64_t KOFFSET = 0xFFFF800000000000ULL;
-                    uint64_t cr3kv = vmm_get_cr3() + KOFFSET;
-                    uint64_t *pml4 = (uint64_t *)(uintptr_t)cr3kv;
-                    size_t i4 = (KERNEL_TEMP_VA >> 39) & 0x1FF;
-                    uint64_t pml4e = pml4[i4];
-                    tty_putstr("[ELF DBG] pml4e="); tty_puthex64(pml4e); tty_putstr("\n");
-                }
-                local_memcpy((void*)(uintptr_t)(KERNEL_TEMP_VA + (target_va & 0xFFF)), tmp, got);
-                vmm_unmap_page(KERNEL_TEMP_VA);
 
                 remaining -= got;
-                offset += got;
             }
         }
-        vmm_set_cr3(orig_cr3);
-    }
-
-    newproc->entry = ehdr.e_entry + base;
-
-    // FIX: Use the RSP returned by build_user_stack, do NOT overwrite it with top-of-page.
-    newproc->user_rsp = build_user_stack(newproc, argv, envp);
-    
-    if (newproc->user_rsp == 0) {
-        kfree(phdrs);
-        return -23;
     }
 
     kfree(phdrs);
+    newproc->entry = ehdr.e_entry;
+
+    // Allocate stack at high user address
+    void *stack_phys = pmm_alloc_page();
+    if (!stack_phys) {
+        tty_putstr("[ELF] Stack alloc failed\n");
+        return -10;
+    }
+
+    memset_k(stack_phys, 0, PAGE_SIZE);
+
+    uint64_t stack_va = 0x7FFFFFFFF000ULL;
+    uint64_t stack_pa = (uint64_t)(uintptr_t)stack_phys;
+
+    // Map stack as PRESENT | WRITE | USER
+    if (vmm_map_page_in_table(user_cr3, stack_va, stack_pa, 0x1 | 0x2 | 0x4) != 0) {
+        tty_putstr("[ELF] Stack map failed\n");
+        return -11;
+    }
+
+    // Set stack pointer (16-byte aligned at top)
+    uint64_t stack_top = stack_va + PAGE_SIZE;
+    newproc->user_rsp = (stack_top - 16) & ~0xFULL;
+
+    tty_putstr("[ELF] Done: entry=");
+    tty_puthex64(newproc->entry);
+    tty_putstr(" rsp=");
+    tty_puthex64(newproc->user_rsp);
+    tty_putstr("\n");
+
     return 0;
 }

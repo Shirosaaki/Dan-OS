@@ -104,64 +104,67 @@ int scheduler_add_task(void (*func)(void)) {
 }
 
 int scheduler_create_user_process(void *entry_point, void *user_stack_top, uint64_t cr3) {
-        tty_putstr("[SCHED DBG] scheduler_create_user_process called\n");
-        tty_putstr("  entry_point: ");
-        tty_puthex64((uint64_t)entry_point);
-        tty_putstr("\n  user_stack_top: ");
-        tty_puthex64((uint64_t)user_stack_top);
-        tty_putstr("\n  cr3: ");
-        tty_puthex64(cr3);
-        tty_putstr("\n");
-    // allocate task struct
+    tty_putstr("[SCHED] Creating user process\n");
+    tty_putstr("  Entry: ");
+    tty_puthex64((uint64_t)entry_point);
+    tty_putstr(" Stack: ");
+    tty_puthex64((uint64_t)user_stack_top);
+    tty_putstr(" CR3: ");
+    tty_puthex64(cr3);
+    tty_putstr("\n");
+
+    // Allocate task structure
     task_struct_t *t = (task_struct_t *)kmalloc(sizeof(task_struct_t));
     if (!t) {
+        tty_putstr("[SCHED] Task malloc failed\n");
         return -1;
     }
     memset_k(t, 0, sizeof(task_struct_t));
 
-    // Allocate kernel stack for the process
-    void *stack = alloc_stack();
-    if (!stack) {
-        tty_putstr("[SCHED] alloc_stack failed for user process\n");
+    // Allocate kernel stack for this process
+    void *kstack = alloc_stack();
+    if (!kstack) {
+        tty_putstr("[SCHED] Kernel stack alloc failed\n");
         kfree(t);
         return -1;
     }
-    t->stack_base = stack;
+    t->stack_base = kstack;
 
+    // Build IRET frame on kernel stack
+    // The frame must match what irq_common_stub expects:
+    // Push order: RAX, RBX, RCX, RDX, RSI, RDI, RBP, R8-R15, error_code, int_no, then IRET frame
+    // Stack layout (bottom to top):
+    // [rax(0), rbx(8), rcx(16), rdx(24), rsi(32), rdi(40), rbp(48), 
+    //  r8(56), r9(64), r10(72), r11(80), r12(88), r13(96), r14(104), r15(112),
+    //  error(120), int_no(128), RIP(136), CS(144), RFLAGS(152), RSP(160), SS(168)]
 
-    // Build initial kernel stack for context switch
-    // Layout must match what irq_common_stub expects:
-    // [rax, rbx, rcx, rdx, rsi, rdi, rbp, r8, r9, r10, r11, r12, r13, r14, r15, error, int_no, RIP, CS, RFLAGS, RSP, SS]
-    uint64_t *stack_top = (uint64_t *)((char*)stack + 4096);
-    stack_top = (uint64_t *)((uintptr_t)stack_top & ~0xF);
-    stack_top -= 22;
-    uint64_t *sp = stack_top;
-    for (int i = 0; i < 15; ++i) sp[i] = 0; // rax..r15
-    // Match IRQ push order: int_no then error
-    sp[15] = 32; // int_no (timer)
-    sp[16] = 0; // error code
-    sp[17] = (uint64_t)entry_point; // RIP
-    sp[18] = 0x1B; // CS (user code segment)
-    sp[19] = 0x202; // RFLAGS
-    sp[20] = (uint64_t)user_stack_top; // RSP (user stack pointer)
-    sp[21] = 0x23; // SS (user data segment)
+    uint64_t *stack_ptr = (uint64_t *)((uintptr_t)kstack + 4096);
+    stack_ptr = (uint64_t *)((uintptr_t)stack_ptr & ~0xF);  // 16-byte align
+    stack_ptr -= 22;  // Reserve space for 22 uint64_t values
 
+    // Zero all registers
+    for (int i = 0; i < 15; i++) {
+        stack_ptr[i] = 0;
+    }
+
+    // Set up IRET frame (from interrupt handler perspective)
+    stack_ptr[15] = 0;                      // error code
+    stack_ptr[16] = 32;                     // int_no (arbitrary, just for consistency)
+    stack_ptr[17] = (uint64_t)entry_point;  // RIP - where to execute
+    stack_ptr[18] = 0x23;                   // CS - User code segment (selector 4, RPL 3)
+    stack_ptr[19] = 0x202;                  // RFLAGS - IF enabled
+    stack_ptr[20] = (uint64_t)user_stack_top;  // RSP - user stack pointer
+    stack_ptr[21] = 0x1B;                   // SS - User data segment (selector 3, RPL 3)
+
+    // Fill in task structure
     t->type = TASK_USER;
-    t->rsp = (uint64_t)sp;
+    t->rsp = (uint64_t)stack_ptr;
     t->cr3 = cr3;
     t->user_rip = (uint64_t)entry_point;
     t->user_rsp = (uint64_t)user_stack_top;
     t->state = TASK_RUNNABLE;
 
-    tty_putstr("[SCHED] user process created, cr3=0x");
-    tty_puthex64(cr3);
-    tty_putstr(", entry=0x");
-    tty_puthex64((uint64_t)entry_point);
-    tty_putstr(", user_rsp=0x");
-    tty_puthex64((uint64_t)user_stack_top);
-    tty_putstr("\n");
-
-    // insert into circular list
+    // Add to task list
     if (!task_list) {
         task_list = t;
         t->next = t;
@@ -170,6 +173,7 @@ int scheduler_create_user_process(void *entry_point, void *user_stack_top, uint6
         task_list->next = t;
     }
 
+    tty_putstr("[SCHED] User process created\n");
     return 0;
 }
 
@@ -245,12 +249,10 @@ void *scheduler_switch(void *regs) {
         temp_kernel_rsp = kernel_stack_top;
         
         // Set segment registers for user mode
-        __asm__ volatile("mov $0x23, %%ax; mov %%ax, %%ds; mov %%ax, %%es; mov %%ax, %%fs; mov %%ax, %%gs" : : : "ax", "memory");
+        // DS/ES/FS/GS should be USER DATA (0x1B), not user code (0x23)
+        __asm__ volatile("mov $0x1B, %%ax; mov %%ax, %%ds; mov %%ax, %%es; mov %%ax, %%fs; mov %%ax, %%gs" : : : "ax", "memory");
     }
 
-    t->state = TASK_RUNNING;
-    current = t;
-    return (void *)t->rsp;
     t->state = TASK_RUNNING;
     current = t;
     return (void *)t->rsp;

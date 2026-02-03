@@ -188,10 +188,15 @@ run-docker:
 	@docker exec -it $$(docker ps -q) bash -c "cd /root/env && qemu-system-x86_64 -cdrom $(ISO) -drive file=$(DISK_IMG),format=raw"
 
 disk:
-	@bash create_disk_mtools.sh
+	dd if=/dev/zero of=disk.img bs=1M count=100
+	mkfs.fat -F 32 disk.img
 
-disk-docker:
-	@docker exec -it $$(docker ps -q) bash -c "cd /root/env && bash create_disk_mtools.sh"
+test-compile:
+	@echo "[CC] Compiling test.c..."
+	x86_64-elf-gcc -nostdlib -fno-stack-protector -fno-asynchronous-unwind-tables -c test/test.c -o test/test.o
+	@echo "[LD] Linking test.elf..."
+	x86_64-elf-ld -T test/test.ld -e _start -o test/test.elf test/test.o
+	@echo "Test binary created at test/test.elf"
 
 help:
 	@echo "Usage: make [target]"

@@ -194,26 +194,11 @@ irq_common_stub:
     ; Pass pointer to saved registers (current rsp) to scheduler and get new rsp in rax
     mov rdi, rsp
     call scheduler_switch
-    ; If scheduler returned a different saved-registers pointer, switch stack to it and load CR3
+    ; If scheduler returned a different saved-registers pointer, switch stack to it
     cmp rax, rdi
     je no_switch
     mov rsp, rax
 
-    ; Check if the task is user mode (CS = 0x1B)
-    mov rbx, [rsp + 144]  ; CS is at rsp + 144 (18*8)
-    cmp rbx, 0x1B
-    jne no_load_cr3
-
-    ; Load new CR3 if set
-    mov rax, [sched_next_cr3]
-    test rax, rax
-    je no_load_cr3
-    mov cr3, rax
-    ; clear it
-    xor rax, rax
-    mov [sched_next_cr3], rax
-
-no_load_cr3:
 no_switch:
 
     ; Restore all registers
@@ -231,51 +216,31 @@ no_switch:
     pop rdx
     pop rcx
     pop rbx
+    ; Don't pop rax yet - we'll use it for CR3
+
+    ; Now stack has: [rax][int_no][error][RIP][CS][RFLAGS][RSP][SS]
+    ; Load CR3 if needed (using rax which is still on stack)
+    mov rax, [sched_next_cr3]
+    test rax, rax
+    jz .no_cr3_switch
+    
+    ; Load the new CR3
+    mov cr3, rax
+    
+    ; Clear the global (use a register we've already restored)
+    push rbx
+    xor rbx, rbx
+    mov [sched_next_cr3], rbx
+    pop rbx
+    
+.no_cr3_switch:
+    ; Now pop rax
     pop rax
 
     ; Clean up error code and IRQ number
     add rsp, 16
 
-    ; If scheduler set a next CR3, load it now (before iretq)
-    mov rax, [sched_next_cr3]
-    test rax, rax
-    je no_cr3_load
-    mov cr3, rax
-    ; clear it (write zero)
-    xor rax, rax
-    mov [sched_next_cr3], rax
-no_cr3_load:
-
-    ; Debug: print stack pointer and values about to be restored for user mode
-    ; After pops and add rsp,16, rsp points at the IRET frame (RIP, CS, RFLAGS, RSP, SS)
-    mov rax, [rsp + 0]   ; RIP
-    mov rbx, [rsp + 8]   ; CS
-    mov rcx, [rsp + 16]  ; RFLAGS
-    mov rdx, [rsp + 24]  ; RSP
-    mov rsi, [rsp + 32]  ; SS
-    ; Only print if CS == 0x1B (user mode)
-    cmp rbx, 0x1B
-    jne .no_user_debug
-    push rdi
-    push rsi
-    push rdx
-    push rcx
-    push rbx
-    push rax
-    mov rdi, debug_msg
-    call tty_putstr
-    mov rdi, rax
-    call tty_puthex64
-    mov rdi, newline
-    call tty_putstr
-    pop rax
-    pop rbx
-    pop rcx
-    pop rdx
-    pop rsi
-    pop rdi
-.no_user_debug:
-    ; Return from interrupt
+    ; Return from interrupt - stack now has: [RIP][CS][RFLAGS][RSP][SS]
     iretq
 
 section .rodata

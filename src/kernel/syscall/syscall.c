@@ -54,11 +54,26 @@ void syscall_init(void) {
     fd_table[STDERR_FILENO].flags = O_WRONLY;
     
     // Setup syscall/sysret MSRs
-    // MSR_STAR: bits 32-47 = kernel CS (0x08), bits 48-63 = user CS (0x1B for ring 3)
-    // On sysret: CS = STAR[48:63] + 16, SS = STAR[48:63] + 8
-    // On syscall: CS = STAR[32:47], SS = STAR[32:47] + 8
-    // Kernel CS = 0x08, User CS = 0x1B (RPL=3)
-    uint64_t star = ((uint64_t)0x08 << 32) | ((uint64_t)0x1B << 48);
+    // MSR_STAR: bits 32-47 = kernel CS (0x08), bits 48-63 = user CS base for SYSRET
+    
+    // For SYSRET:
+    // CS = STAR[48:63] + 16
+    // SS = STAR[48:63] + 8
+    
+    // We configured GDT:
+    // Index 3 (0x18): User Data
+    // Index 4 (0x20): User Code
+    
+    // We want:
+    // SS = 0x18 (or 0x1B with RPL3) -> Base + 8 = 0x18 -> Base = 0x10
+    // CS = 0x20 (or 0x23 with RPL3) -> Base + 16 = 0x20 -> Base = 0x04? No. 0x10 + 0x10 = 0x20.
+    
+    // So Base should be 0x10 (Kernel Data descriptor offset, or just 0x13 to include RPL3).
+    // Let's use 0x13 (0x10 | 3).
+    // CS = 0x13 + 16 = 0x23 (User Code, RPL3)
+    // SS = 0x13 + 8 = 0x1B (User Data, RPL3)
+    
+    uint64_t star = ((uint64_t)0x08 << 32) | ((uint64_t)0x13 << 48);
     wrmsr(MSR_STAR, star);
     
     // MSR_LSTAR: syscall entry point (64-bit mode)
@@ -66,6 +81,18 @@ void syscall_init(void) {
     
     // MSR_SYSCALL_MASK: clear IF (interrupt flag) on syscall entry
     wrmsr(MSR_SYSCALL_MASK, 0x200); // Disable interrupts during syscall
+    
+    // Enable EFER.SCE (System Call Enable) - bit 0
+    #define MSR_EFER 0xC0000080
+    #define EFER_SCE 1
+    uint64_t efer = rdmsr(MSR_EFER);
+    if (!(efer & EFER_SCE)) {
+        wrmsr(MSR_EFER, efer | EFER_SCE);
+    }
+    
+    tty_putstr("[SYSCALL] Initialized. LSTAR=0x");
+    tty_puthex64((uint64_t)syscall_entry);
+    tty_putstr("\n");
 }
 
 // Syscall dispatcher
