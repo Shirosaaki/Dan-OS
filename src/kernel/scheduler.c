@@ -35,7 +35,17 @@ static task_struct_t *current = NULL;
 // We will store rsp pointing to where the first pushed register (rax) is located.
 
 void scheduler_init(void) {
-    // nothing now; tasks will be allocated on demand
+    // Pre-allocate a current task structure to avoid malloc during interrupts
+    current = (task_struct_t *)kmalloc(sizeof(task_struct_t));
+    if (current) {
+        for (size_t i = 0; i < sizeof(task_struct_t); ++i) ((char*)current)[i] = 0;
+        current->type = TASK_KERNEL;
+        current->state = TASK_RUNNING;
+        current->next = current;  // Point to itself for now
+        
+        // Initialize task_list to current kernel task
+        task_list = current;
+    }
 }
 
 // helper to allocate a stack (one page)
@@ -211,20 +221,16 @@ void *scheduler_switch(void *regs) {
     // If no tasks, return same regs
     if (!task_list) return regs;
 
-    // Save current task context: if current is NULL, create a fake current for the interrupted context
+    // Save current task context: if current is NULL, skip (should not happen now)
     if (!current) {
-        current = (task_struct_t *)kmalloc(sizeof(task_struct_t));
-        for (size_t i = 0; i < sizeof(task_struct_t); ++i) ((char*)current)[i] = 0;
-        current->rsp = (uint64_t)regs;
-        current->cr3 = vmm_get_cr3();
-        current->state = TASK_RUNNING;
-        current->next = task_list;
-    } else {
-        // Save regs into current->rsp
-        current->rsp = (uint64_t)regs;
-        current->cr3 = vmm_get_cr3();
-        current->state = TASK_RUNNABLE;
+        tty_putstr("[SCHED] ERROR: current is NULL in scheduler_switch\n");
+        return regs;
     }
+    
+    // Save regs into current->rsp
+    current->rsp = (uint64_t)regs;
+    current->cr3 = vmm_get_cr3();
+    current->state = TASK_RUNNABLE;
 
     // Select next runnable task
     task_struct_t *t = current->next ? current->next : task_list;

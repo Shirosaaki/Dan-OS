@@ -200,6 +200,19 @@ irq_common_stub:
     mov rsp, rax
 
 no_switch:
+    ; CRITICAL: Load CR3 BEFORE popping registers (while we still can use registers safely)
+    mov rax, [sched_next_cr3]
+    test rax, rax
+    jz .no_cr3_switch
+    
+    ; Load the new CR3
+    mov cr3, rax
+    
+    ; Clear the global
+    xor rax, rax
+    mov [sched_next_cr3], rax
+    
+.no_cr3_switch:
 
     ; Restore all registers
     pop r15
@@ -216,25 +229,6 @@ no_switch:
     pop rdx
     pop rcx
     pop rbx
-    ; Don't pop rax yet - we'll use it for CR3
-
-    ; Now stack has: [rax][int_no][error][RIP][CS][RFLAGS][RSP][SS]
-    ; Load CR3 if needed (using rax which is still on stack)
-    mov rax, [sched_next_cr3]
-    test rax, rax
-    jz .no_cr3_switch
-    
-    ; Load the new CR3
-    mov cr3, rax
-    
-    ; Clear the global (use a register we've already restored)
-    push rbx
-    xor rbx, rbx
-    mov [sched_next_cr3], rbx
-    pop rbx
-    
-.no_cr3_switch:
-    ; Now pop rax
     pop rax
 
     ; Clean up error code and IRQ number

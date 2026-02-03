@@ -73,6 +73,15 @@ void kernel_main(void *multiboot_info) {
     scheduler_init();
     // Initialize syscall mechanism
     syscall_init();
+    
+    // Disable timer interrupt (IRQ0) for now while debugging user mode
+    extern u8 port_byte_in(u16);
+    extern void port_byte_out(u16, u8);
+    u8 pic_mask = port_byte_in(0x21);
+    pic_mask |= 0x01;  // Disable IRQ0 (timer)
+    port_byte_out(0x21, pic_mask);
+    tty_putstr("[KERNEL] Timer interrupt disabled\n");
+    
     // Add a simple test kernel thread
     extern void test_thread(void);
     scheduler_add_task(test_thread);
